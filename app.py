@@ -6,7 +6,7 @@ import plotly.express as px
 import streamlit as st
 
 import portfolio
-from data import add_grades, fetch_history, period_returns
+from data import add_grades, compute_power_gauge_ratings, fetch_history, period_returns
 from tickers import NAMES, TICKERS
 
 st.set_page_config(page_title="Dealscout", page_icon="📈", layout="wide")
@@ -14,7 +14,7 @@ portfolio.init_db()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 Dealscout")
-page = st.sidebar.radio("Navigate", ["Dashboard", "Holdings", "Trades", "Performance"])
+page = st.sidebar.radio("Navigate", ["Dashboard", "Power Gauge", "Holdings", "Trades", "Performance"])
 st.sidebar.caption(f"Universe: {len(TICKERS)} tickers")
 if st.sidebar.button("🔄 Refresh prices"):
     st.cache_data.clear()
@@ -62,6 +62,43 @@ if page == "Dashboard":
             }),
             width="stretch", hide_index=True,
         )
+
+elif page == "Power Gauge":
+    st.title("Power Gauge")
+    st.caption("Chaikin-style 4-category composite rating ported from stock_evaluator.")
+
+    pg = compute_power_gauge_ratings(TICKERS)
+    if pg.empty:
+        st.warning("No ratings available — check your network and refresh.")
+    else:
+        bucket_counts = pg["label"].value_counts()
+        cols = st.columns(7)
+        bucket_order = ["Very Bullish", "Bullish", "Neutral+", "Neutral", "Neutral-", "Bearish", "Very Bearish"]
+        for i, label in enumerate(bucket_order):
+            cols[i].metric(label, int(bucket_counts.get(label, 0)))
+
+        view = pg.copy()
+        view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
+        view = view.rename(columns={
+            "ticker": "Ticker", "name": "Name", "label": "Rating", "score": "Score",
+            "fin": "Fin", "earn": "Earn", "tech": "Tech", "exp": "Exp",
+            "adjustment": "Adjustment",
+        })
+        st.dataframe(
+            view[["Ticker", "Name", "Rating", "Score", "Fin", "Earn", "Tech", "Exp", "Adjustment"]],
+            width="stretch", hide_index=True,
+        )
+
+        with st.expander("Ticker drilldown"):
+            pick = st.selectbox("Ticker", options=sorted(pg["ticker"].tolist()))
+            row = pg[pg["ticker"] == pick].iloc[0]
+            st.markdown(f"**{pick} — {row['label']}** (score {row['score']})")
+            st.write(row["narrative"])
+            st.write({
+                "Financials": row["fin"], "Earnings": row["earn"],
+                "Technicals": row["tech"], "Experts": row["exp"],
+                "Adjustment": row["adjustment"],
+            })
 
 elif page == "Holdings":
     st.title("Holdings")
