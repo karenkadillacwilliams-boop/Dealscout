@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(semgrep login:*)",
+      "Bash(semgrep whoami:*)",
+      "Bash(semgrep --version)",
+      "Read(//c/Users/mwill/.semgrep/**)",
+      "Bash(gh auth:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
