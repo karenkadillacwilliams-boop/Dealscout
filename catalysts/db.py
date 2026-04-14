@@ -104,14 +104,8 @@ def seed_universe_if_empty(conn: sqlite3.Connection, tickers: Iterable[str]) -> 
 
 def persist_catalyst(conn: sqlite3.Connection, item: RerankedItem) -> int:
     raw = item.scored.raw
-    existing = conn.execute(
-        "SELECT id FROM catalysts WHERE source=? AND source_id=?",
-        (raw.source, raw.source_id),
-    ).fetchone()
-    if existing:
-        return existing[0]
-    cur = conn.execute(
-        """INSERT INTO catalysts
+    conn.execute(
+        """INSERT OR IGNORE INTO catalysts
            (ticker, source, source_id, form_type, headline, url, published_at,
             kw_score, llm_score, final_score, tags, rationale, seen, fetched_at)
            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0,?)""",
@@ -122,8 +116,12 @@ def persist_catalyst(conn: sqlite3.Connection, item: RerankedItem) -> int:
             json.dumps(list(item.scored.tags)), item.rationale, _now(),
         ),
     )
+    row = conn.execute(
+        "SELECT id FROM catalysts WHERE source=? AND source_id=?",
+        (raw.source, raw.source_id),
+    ).fetchone()
     conn.commit()
-    return int(cur.lastrowid)
+    return int(row[0])
 
 
 def mark_seen(conn: sqlite3.Connection, catalyst_ids: Iterable[int]) -> None:
@@ -142,4 +140,4 @@ def unseen_alert_count(conn: sqlite3.Connection) -> int:
 
 def last_poll_time(conn: sqlite3.Connection) -> str | None:
     row = conn.execute("SELECT MAX(fetched_at) FROM catalysts").fetchone()
-    return row[0] if row else None
+    return row[0]
