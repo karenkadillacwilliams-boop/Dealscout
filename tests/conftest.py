@@ -9,9 +9,12 @@ def tmp_db(tmp_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    yield conn
-    conn.close()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
+# All tests under tests/ are catalyst-radar tests; revisit scope if non-catalyst tests are added.
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
