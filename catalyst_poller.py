@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from catalysts import db as cdb
-from catalysts import edgar, score
+from catalysts import edgar, news, score
 from catalysts.dedup import filter_unseen
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
 
@@ -32,6 +32,8 @@ def run_once(dry_run: bool = False) -> int:
 
     raw: list[RawCatalyst] = []
     raw += edgar.fetch(tickers, since_hours=2)
+    raw += news.fetch_yfinance(tickers)
+    raw += news.fetch_gnews_rss(tickers)
     print(f"[poller] fetched {len(raw)} raw items")
 
     fresh = filter_unseen(conn, raw)
