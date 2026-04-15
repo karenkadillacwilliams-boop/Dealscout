@@ -18,7 +18,6 @@ _DICT: list[tuple[str, int, str]] = [
     ("tender offer",           35, "m&a-confirmed"),
     # M&A — rumored
     ("in talks to",                    25, "m&a-rumor"),
-    ("in talks to acquire",            25, "m&a-rumor"),
     ("exploring sale",                 25, "m&a-rumor"),
     ("exploring strategic alternatives", 25, "m&a-rumor"),
     ("weighing bid",                   25, "m&a-rumor"),

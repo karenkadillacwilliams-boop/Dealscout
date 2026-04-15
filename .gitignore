@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 venv/
 .streamlit/secrets.toml
+*.db
 *.db-wal
 *.db-shm
 .pytest_cache/
