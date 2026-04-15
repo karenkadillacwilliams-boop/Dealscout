@@ -18,12 +18,16 @@ _conn = cdb.connect()
 cdb.migrate(_conn)
 cdb.seed_universe_if_empty(_conn, TICKERS)
 ACTIVE_TICKERS = cdb.load_active_universe(_conn) or TICKERS
+_unseen = cdb.unseen_alert_count(_conn)
+_last_poll = cdb.last_poll_time(_conn)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 Dealscout")
+_badge = f" 🔴 {_unseen}" if _unseen else ""
 page = st.sidebar.radio("Navigate",
-    ["Dashboard", "Catalysts", "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
+    ["Dashboard", "Catalysts" + _badge, "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
 st.sidebar.caption(f"Universe: {len(ACTIVE_TICKERS)} tickers")
+st.sidebar.caption(f"Last catalyst poll: {_last_poll or '—'}")
 if st.sidebar.button("🔄 Refresh prices"):
     st.cache_data.clear()
     st.rerun()
@@ -57,16 +61,26 @@ if page == "Dashboard":
         top_cols[3].metric("Avg monthly", _fmt_pct(returns_df["monthly_pct"].mean()))
 
         view = returns_df.copy()
+        cat_rows = _conn.execute(
+            """SELECT ticker, MAX(final_score) AS cat
+               FROM catalysts
+               WHERE datetime(published_at) >= datetime('now','-24 hours')
+               GROUP BY ticker"""
+        ).fetchall()
+        cat_map = {r["ticker"]: r["cat"] for r in cat_rows}
+        view["catalyst"] = view["ticker"].map(cat_map).fillna(0).astype(int)
         view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
         view = view.rename(columns={
             "ticker": "Ticker", "name": "Name", "last": "Last",
             "daily_pct": "Daily %", "weekly_pct": "Weekly %",
             "monthly_pct": "Monthly %", "grade": "Grade",
+            "catalyst": "Catalyst",
         })
         st.dataframe(
             view.style.format({
                 "Last": "${:,.2f}",
                 "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%", "Monthly %": "{:+.2f}%",
+                "Catalyst": "{:d}",
             }),
             width="stretch", hide_index=True,
         )
@@ -204,7 +218,7 @@ elif page == "Performance":
             fig.update_layout(yaxis_title="Index (start = 100)", xaxis_title="")
             st.plotly_chart(fig, width="stretch")
 
-elif page == "Catalysts":
+elif page.startswith("Catalysts"):
     import json
     from urllib.parse import urlparse
     st.title("Catalysts")
