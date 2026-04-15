@@ -8,8 +8,14 @@ from email.message import EmailMessage
 NAME = "email"
 
 
+_REQUIRED_ENV = ("GMAIL_USER", "GMAIL_APP_PW", "ALERT_TO_EMAIL")
+
+
 def send(*, subject: str, headline: str, rationale: str | None, url: str,
          source: str, published_at: str, **_) -> None:
+    missing = [k for k in _REQUIRED_ENV if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(f"email channel missing env vars: {', '.join(missing)}")
     user = os.environ["GMAIL_USER"]
     pw = os.environ["GMAIL_APP_PW"]
     to = os.environ["ALERT_TO_EMAIL"]
