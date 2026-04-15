@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import logging
 
-from alerts import email
+from alerts import discord, email
 from catalysts.types import RerankedItem
 
 log = logging.getLogger("alerts")
 
-_CHANNELS = (email,)  # discord appended in Task 11
+_CHANNELS = (email, discord)
 
 
 def send(item: RerankedItem) -> tuple[bool, list[str]]:
