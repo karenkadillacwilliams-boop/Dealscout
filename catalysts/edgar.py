@@ -81,7 +81,7 @@ def fetch(tickers: Iterable[str], since_hours: int = 2) -> list[RawCatalyst]:
                         e.published_at.replace("Z", "+00:00")
                     ).timestamp()
                 except Exception:
-                    ts = cutoff  # keep, don't crash
+                    continue  # unparseable timestamp → drop, don't bias toward noise
                 if ts >= cutoff:
                     out.append(e)
         except Exception as ex:  # network hiccup, 403, etc. — skip this ticker
