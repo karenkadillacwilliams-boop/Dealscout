@@ -259,11 +259,11 @@ elif page == "Catalysts":
         cdb.mark_seen(_conn, [r["id"] for r in records])
 
         st.subheader("Drilldown")
+        _fmt = {r["id"]: f"{r['ticker']} — {r['headline'][:80]}" for r in records}
         pick_id = st.selectbox(
             "Catalyst",
             options=[r["id"] for r in records],
-            format_func=lambda i: next(f"{r['ticker']} — {r['headline'][:80]}"
-                                       for r in records if r["id"] == i),
+            format_func=_fmt.get,
         )
         row = next(r for r in records if r["id"] == pick_id)
         st.markdown(f"**{row['ticker']} — score {row['final_score']}**")
