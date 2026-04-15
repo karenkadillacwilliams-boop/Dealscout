@@ -28,7 +28,19 @@ def _ua() -> str:
 
 
 _ACC_RE = re.compile(r"accession-number=([0-9\-]+)")
-_FORM_RE = re.compile(r"^([A-Z0-9\-/]+)\s*-")
+_BRACKET_TAIL = re.compile(r"\s*\[.*?\]\s*$")
+
+
+def _extract_form(title: str) -> str | None:
+    """Form type = the chunk before the first ' - ' separator in EDGAR titles.
+    Strips trailing bracketed annotations like '[Amend]' so 'SCHEDULE 13G/A
+    [Amend]  - ...' becomes 'SCHEDULE 13G/A'.
+    """
+    if " - " not in title:
+        return None
+    head = title.split(" - ", 1)[0]
+    head = _BRACKET_TAIL.sub("", head).strip()
+    return head or None
 
 
 def _parse_atom(body: bytes, ticker: str) -> list[RawCatalyst]:
@@ -44,8 +56,7 @@ def _parse_atom(body: bytes, ticker: str) -> list[RawCatalyst]:
         m_acc = _ACC_RE.search(id_text)
         acc = m_acc.group(1) if m_acc else id_text or url
 
-        m_form = _FORM_RE.match(title)
-        form_type = m_form.group(1) if m_form else None
+        form_type = _extract_form(title)
 
         try:
             dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))

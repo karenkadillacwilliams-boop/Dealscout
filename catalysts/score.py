@@ -55,10 +55,17 @@ _COMPILED: list[tuple[re.Pattern, int, str, str]] = [
     for p, w, t in _DICT
 ]
 
-_FILING_FORMS_HIGH_SIGNAL: frozenset[str] = frozenset({
-    "8-K", "13D", "SC 13D", "SC 13G", "425", "SC TO-T", "S-4", "DEFM14A",
-})
+_FILING_FORM_PREFIXES: tuple[str, ...] = (
+    "8-K", "SCHEDULE 13D", "SCHEDULE 13G", "425",
+    "SC TO-T", "SCHEDULE TO-T", "S-4", "DEFM14A",
+)
 _FILING_BONUS = 20
+
+
+def _is_high_signal_form(form_type: str | None) -> bool:
+    if not form_type:
+        return False
+    return any(form_type.startswith(p) for p in _FILING_FORM_PREFIXES)
 
 
 def score_item(raw: RawCatalyst) -> ScoredItem:
@@ -76,7 +83,7 @@ def score_item(raw: RawCatalyst) -> ScoredItem:
 
     # Strong M&A signal in an M&A-relevant form → filing bonus and tag.
     has_ma_tag = any(t.startswith("m&a") or t == "activist" for t in tags)
-    if raw.form_type in _FILING_FORMS_HIGH_SIGNAL and has_ma_tag:
+    if _is_high_signal_form(raw.form_type) and has_ma_tag:
         total += _FILING_BONUS
         if "filing" not in tags:
             tags.append("filing")
