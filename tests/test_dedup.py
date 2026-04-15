@@ -19,11 +19,14 @@ def test_filter_unseen(tmp_db):
 
 
 def test_recently_alerted(tmp_db):
+    from datetime import datetime, timezone
     cdb.migrate(tmp_db)
     assert recently_alerted(tmp_db, "NVDA", 8, hours=6) is False
+    sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     tmp_db.execute(
         "INSERT INTO alert_log(catalyst_id,ticker,score_bucket,channels,sent_at,ok) "
-        "VALUES(1,'NVDA',8,'[\"email\"]', datetime('now'),1)"
+        "VALUES(1,'NVDA',8,'[\"email\"]', ?, 1)",
+        (sent_at,),
     )
     tmp_db.commit()
     assert recently_alerted(tmp_db, "NVDA", 8, hours=6) is True

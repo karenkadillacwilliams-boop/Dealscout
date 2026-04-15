@@ -65,10 +65,11 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if recently_alerted(conn, item.ticker, bucket, hours=6):
             continue
         ok, channels = dispatcher.send(item)
+        sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.execute(
             "INSERT INTO alert_log(catalyst_id,ticker,score_bucket,channels,sent_at,ok) "
-            "VALUES(?,?,?,?,datetime('now'),?)",
-            (cid, item.ticker, bucket, json.dumps(channels), 1 if ok else 0),
+            "VALUES(?,?,?,?,?,?)",
+            (cid, item.ticker, bucket, json.dumps(channels), sent_at, 1 if ok else 0),
         )
         conn.commit()
         alerts_sent += 1
