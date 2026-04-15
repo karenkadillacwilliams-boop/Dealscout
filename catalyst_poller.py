@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from catalysts import db as cdb
-from catalysts import edgar, news, score
+from catalysts import edgar, news, score, rerank
 from catalysts.dedup import filter_unseen
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
 
@@ -40,7 +40,16 @@ def run_once(dry_run: bool = False) -> int:
     print(f"[poller] {len(fresh)} new after dedup")
 
     scored = [score.score_item(r) for r in fresh]
-    reranked = [_to_reranked_kw_only(s) for s in scored]
+    rerank_pool = [s for s in scored if s.kw_score >= 20]
+    reranked_map = {id(s): r for s, r in zip(rerank_pool,
+                    rerank.rerank_batched(rerank_pool, batch=10))}
+    reranked: list[RerankedItem] = []
+    for s in scored:
+        r = reranked_map.get(id(s))
+        if r is not None:
+            reranked.append(r)
+        else:
+            reranked.append(_to_reranked_kw_only(s))
 
     if dry_run:
         print(json.dumps([
