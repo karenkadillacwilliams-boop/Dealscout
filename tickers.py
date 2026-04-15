@@ -14,6 +14,10 @@ MANUAL_ADDS = [
 
 TICKERS = FROM_PDF + MANUAL_ADDS
 
+# Authoritative ticker list now lives in the `universe` table.
+# TICKERS is kept as a seed for first-run and as a fallback.
+SEED_TICKERS = TICKERS
+
 NAMES = {
     "NBIS": "Nebius Group", "ALAB": "Astera Labs", "BE": "Bloom Energy",
     "MRVL": "Marvell Technology", "TER": "Teradyne", "LRCX": "Lam Research",

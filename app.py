@@ -12,16 +12,23 @@ from tickers import NAMES, TICKERS
 st.set_page_config(page_title="Dealscout", page_icon="📈", layout="wide")
 portfolio.init_db()
 
+from catalysts import db as cdb
+
+_conn = cdb.connect()
+cdb.migrate(_conn)
+cdb.seed_universe_if_empty(_conn, TICKERS)
+ACTIVE_TICKERS = cdb.load_active_universe(_conn) or TICKERS
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 Dealscout")
-page = st.sidebar.radio("Navigate", ["Dashboard", "Power Gauge", "Holdings", "Trades", "Performance"])
-st.sidebar.caption(f"Universe: {len(TICKERS)} tickers")
+page = st.sidebar.radio("Navigate", ["Dashboard", "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
+st.sidebar.caption(f"Universe: {len(ACTIVE_TICKERS)} tickers")
 if st.sidebar.button("🔄 Refresh prices"):
     st.cache_data.clear()
     st.rerun()
 
 # ── Shared data load ──────────────────────────────────────────────────────────
-prices = fetch_history(TICKERS, period="6mo")
+prices = fetch_history(ACTIVE_TICKERS, period="6mo")
 returns_df = add_grades(period_returns(prices))
 last_prices = dict(zip(returns_df["ticker"], returns_df["last"])) if not returns_df.empty else {}
 
@@ -67,7 +74,7 @@ elif page == "Power Gauge":
     st.title("Power Gauge")
     st.caption("Chaikin-style 4-category composite rating ported from stock_evaluator.")
 
-    pg = compute_power_gauge_ratings(TICKERS)
+    pg = compute_power_gauge_ratings(ACTIVE_TICKERS)
     if pg.empty:
         st.warning("No ratings available — check your network and refresh.")
     else:
@@ -149,7 +156,7 @@ elif page == "Trades":
     with st.form("new_trade", clear_on_submit=True):
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
         with c1:
-            ticker = st.selectbox("Ticker", options=sorted(TICKERS))
+            ticker = st.selectbox("Ticker", options=sorted(ACTIVE_TICKERS))
         with c2:
             side = st.selectbox("Side", ["BUY", "SELL"])
         with c3:
@@ -195,3 +202,58 @@ elif page == "Performance":
             fig = px.line(normalized, title="Indexed to 100 at start of window")
             fig.update_layout(yaxis_title="Index (start = 100)", xaxis_title="")
             st.plotly_chart(fig, width="stretch")
+
+elif page == "Universe":
+    import re
+    st.title("Universe")
+    st.caption("Active tickers used by the Dashboard, Power Gauge, and Catalyst poller.")
+
+    active = cdb.load_active_universe(_conn)
+    st.metric("Active tickers", len(active))
+
+    rows = _conn.execute(
+        "SELECT ticker, name, added_at, active FROM universe ORDER BY ticker"
+    ).fetchall()
+    import pandas as pd
+    df = pd.DataFrame([dict(r) for r in rows])
+    st.dataframe(df, width="stretch", hide_index=True)
+
+    st.subheader("Add ticker")
+    with st.form("add_ticker", clear_on_submit=True):
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c1:
+            new_t = st.text_input("Ticker").strip().upper()
+        with c2:
+            new_n = st.text_input("Name (optional)").strip()
+        with c3:
+            add = st.form_submit_button("Add", type="primary")
+        if add:
+            if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", new_t or ""):
+                cdb.upsert_universe(_conn, new_t, new_n or None)
+                st.success(f"Added {new_t}")
+                st.rerun()
+            else:
+                st.error("Invalid ticker format.")
+
+    st.subheader("Remove ticker")
+    rm = st.selectbox("Ticker to deactivate", options=active)
+    if st.button("Deactivate", type="secondary"):
+        cdb.deactivate_ticker(_conn, rm)
+        st.success(f"Deactivated {rm}")
+        st.rerun()
+
+    st.subheader("Bulk import")
+    raw = st.text_area("Paste comma- or newline-separated tickers")
+    if st.button("Import"):
+        tokens = [t.strip().upper() for t in re.split(r"[,\s]+", raw) if t.strip()]
+        added, bad = 0, []
+        for t in tokens:
+            if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", t):
+                cdb.upsert_universe(_conn, t)
+                added += 1
+            else:
+                bad.append(t)
+        st.success(f"Added {added} tickers.")
+        if bad:
+            st.warning(f"Skipped invalid: {', '.join(bad)}")
+        st.rerun()
