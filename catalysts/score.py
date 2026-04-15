@@ -81,6 +81,19 @@ def score_item(raw: RawCatalyst) -> ScoredItem:
             if tag not in tags:
                 tags.append(tag)
 
+    # Form-type-based auto-tagging for filings whose titles never contain the
+    # activist phrases. EDGAR labels: "SCHEDULE 13D", "SCHEDULE 13G", with "/A"
+    # suffix for amendments (passive position adjustments — discount).
+    ft = raw.form_type or ""
+    if ft.startswith("SCHEDULE 13D"):
+        total += 15 if ft.endswith("/A") else 25
+        if "activist" not in tags:
+            tags.append("activist")
+    elif ft.startswith("SCHEDULE 13G"):
+        total += 5 if ft.endswith("/A") else 15
+        if "activist" not in tags:
+            tags.append("activist")
+
     # Strong M&A signal in an M&A-relevant form → filing bonus and tag.
     has_ma_tag = any(t.startswith("m&a") or t == "activist" for t in tags)
     if _is_high_signal_form(raw.form_type) and has_ma_tag:
