@@ -215,7 +215,21 @@ elif page == "Universe":
         "SELECT ticker, name, added_at, active FROM universe ORDER BY ticker"
     ).fetchall()
     import pandas as pd
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    _AZ = ZoneInfo("America/Phoenix")
+
+    def _to_az(iso: str | None) -> str:
+        if not iso:
+            return ""
+        try:
+            return datetime.fromisoformat(iso).astimezone(_AZ).strftime("%Y-%m-%d %H:%M:%S MST")
+        except Exception:
+            return iso
+
     df = pd.DataFrame([dict(r) for r in rows])
+    if not df.empty:
+        df["added_at"] = df["added_at"].map(_to_az)
     st.dataframe(df, width="stretch", hide_index=True)
 
     st.subheader("Add ticker")
