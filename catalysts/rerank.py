@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -16,7 +17,8 @@ from typing import Iterable
 from catalysts.types import RerankedItem, ScoredItem
 
 _COUNTER_FILE = Path(__file__).resolve().parent.parent / ".rerank_counter.json"
-_MODEL = "claude-haiku-4-5-20251001"
+_MODEL = "claude-haiku-4-5"
+_JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 _SYSTEM = (
     "You are an M&A and catalyst analyst. For each headline, rate 0-10 how "
@@ -74,13 +76,13 @@ def _call_claude(batch: list[tuple[int, ScoredItem]]) -> list[dict]:
         system=_SYSTEM,
         messages=[{"role": "user", "content": user}],
     )
-    text = resp.content[0].text.strip()
-    # Tolerate code fences
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-    return json.loads(text)
+    text = resp.content[0].text
+    # Extract the first [...] block — tolerates code fences, leading text,
+    # trailing commentary, and ```json wrappers without fragile char strips.
+    m = _JSON_ARRAY_RE.search(text)
+    if not m:
+        raise ValueError(f"no JSON array in model output: {text[:200]!r}")
+    return json.loads(m.group(0))
 
 
 def rerank_batched(items: Iterable[ScoredItem], batch: int = 10) -> list[RerankedItem]:
