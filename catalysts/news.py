@@ -24,8 +24,11 @@ def fetch_gnews_rss(tickers: Iterable[str]) -> list[RawCatalyst]:
             r.raise_for_status()
             feed = feedparser.parse(r.content)
             for entry in feed.entries[:20]:
-                guid = getattr(entry, "id", None) or getattr(entry, "link", "")
-                published = getattr(entry, "published", "") or ""
+                title = getattr(entry, "title", "") or ""
+                link = getattr(entry, "link", "") or ""
+                if not title or not link:
+                    continue
+                guid = getattr(entry, "id", None) or link
                 try:
                     dt = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
                     published = dt.isoformat(timespec="seconds")
@@ -34,8 +37,8 @@ def fetch_gnews_rss(tickers: Iterable[str]) -> list[RawCatalyst]:
                 out.append(RawCatalyst(
                     ticker=t, source="gnews",
                     source_id=f"gnews:{t}:{guid}",
-                    headline=entry.title,
-                    url=getattr(entry, "link", ""),
+                    headline=title,
+                    url=link,
                     published_at=published,
                 ))
         except Exception as ex:
