@@ -63,7 +63,13 @@ if page == "Dashboard":
         top_cols[2].metric("Avg weekly",  _fmt_pct(returns_df["weekly_pct"].mean()))
         top_cols[3].metric("Avg monthly", _fmt_pct(returns_df["monthly_pct"].mean()))
 
+        # ── Filter / search ──
+        _filter_q = st.text_input("Filter tickers", placeholder="Type to filter (e.g. NV, ARM)").strip().upper()
+
         view = returns_df.copy()
+        if _filter_q:
+            view = view[view["ticker"].str.contains(_filter_q, na=False)]
+
         cat_rows = _conn.execute(
             """SELECT ticker, MAX(final_score) AS cat
                FROM catalysts
@@ -92,6 +98,47 @@ if page == "Dashboard":
 
         view["options"] = view["ticker"].map(_opts_badge)
 
+        # ── IV Rank from options_snapshot ──
+        ivr_rows = _conn.execute(
+            "SELECT ticker, iv_rank FROM options_snapshot "
+            "WHERE id IN (SELECT MIN(id) FROM options_snapshot GROUP BY ticker)"
+        ).fetchall()
+        ivr_map = {r["ticker"]: r["iv_rank"] for r in ivr_rows}
+        view["iv_rank"] = view["ticker"].map(ivr_map)
+
+        # ── Days to Earnings ──
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _earnings_countdowns(tickers_tuple):
+            import yfinance as yf
+            from datetime import datetime, timezone
+            out = {}
+            now = datetime.now(timezone.utc)
+            for t in tickers_tuple:
+                try:
+                    cal = yf.Ticker(t).calendar
+                    if cal is not None and not (isinstance(cal, pd.DataFrame) and cal.empty):
+                        if isinstance(cal, dict):
+                            ed = cal.get("Earnings Date")
+                            if isinstance(ed, list) and ed:
+                                ed = ed[0]
+                        elif isinstance(cal, pd.DataFrame):
+                            ed = cal.iloc[0, 0] if not cal.empty else None
+                        else:
+                            ed = None
+                        if ed is not None:
+                            if isinstance(ed, pd.Timestamp):
+                                ed = ed.to_pydatetime()
+                            if hasattr(ed, "date"):
+                                delta = (ed - now).days
+                                if 0 <= delta <= 90:
+                                    out[t] = delta
+                except Exception:
+                    pass
+            return out
+
+        dte_map = _earnings_countdowns(tuple(view["ticker"].tolist()))
+        view["earnings_dte"] = view["ticker"].map(dte_map)
+
         entry_rows = _conn.execute(
             "SELECT ticker, added_at FROM universe WHERE active=1"
         ).fetchall()
@@ -104,17 +151,63 @@ if page == "Dashboard":
             "daily_pct": "Daily %", "weekly_pct": "Weekly %",
             "monthly_pct": "Monthly %", "ytd_pct": "YTD %",
             "grade": "Grade", "catalyst": "Catalyst",
-            "options": "Options", "entry": "Entry",
+            "options": "Options", "iv_rank": "IV Rank",
+            "earnings_dte": "Earn DTE", "entry": "Entry",
         })
-        st.dataframe(
-            view[["Ticker", "Name", "Last", "Daily %", "Weekly %", "Monthly %", "YTD %", "Grade", "Catalyst", "Options", "Entry"]].style.format({
+
+        _display_cols = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
+                         "Monthly %", "YTD %", "Grade", "Catalyst", "Options",
+                         "IV Rank", "Earn DTE", "Entry"]
+
+        def _pct_bar(val):
+            if pd.isna(val):
+                return ""
+            color = "#d4edda" if val >= 0 else "#f8d7da"
+            width = min(abs(val) * 2, 100)
+            return f"background: linear-gradient(90deg, {color} {width}%, transparent {width}%)"
+
+        def _ivr_color(val):
+            if pd.isna(val):
+                return ""
+            if val < 30:
+                return "background-color: #d4edda"
+            if val <= 60:
+                return "background-color: #fff3cd"
+            return "background-color: #f8d7da"
+
+        def _dte_color(val):
+            if pd.isna(val):
+                return ""
+            if val <= 7:
+                return "color: #dc3545; font-weight: bold"
+            if val <= 14:
+                return "color: #fd7e14"
+            return ""
+
+        styled = (
+            view[_display_cols].style
+            .format({
                 "Last": "${:,.2f}",
                 "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%",
                 "Monthly %": "{:+.2f}%", "YTD %": "{:+.2f}%",
                 "Catalyst": "{:d}",
-            }),
-            width="stretch", hide_index=True,
+                "IV Rank": lambda v: f"{v:.0f}%" if pd.notna(v) else "—",
+                "Earn DTE": lambda v: f"{int(v)}d" if pd.notna(v) else "—",
+            })
+            .map(_pct_bar, subset=["Daily %", "Weekly %", "Monthly %", "YTD %"])
+            .map(_ivr_color, subset=["IV Rank"])
+            .map(_dte_color, subset=["Earn DTE"])
         )
+        st.dataframe(styled, width="stretch", hide_index=True)
+
+        with st.expander("Grade legend"):
+            st.markdown(
+                "**Momentum grade** — weighted score: 20% daily + 30% weekly + 50% monthly, "
+                "relative to portfolio average weekly return.\n\n"
+                "| Grade | Relative score |\n|---|---|\n"
+                "| **A** | >= +8 |\n| **B** | >= +3 |\n| **C** | >= -2 |\n"
+                "| **D** | >= -7 |\n| **F** | < -7 |"
+            )
 
 elif page == "Power Gauge":
     st.title("Power Gauge")
