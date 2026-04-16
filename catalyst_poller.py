@@ -17,6 +17,7 @@ from catalysts import db as cdb
 from catalysts import edgar, news, score, rerank, options
 from catalysts.dedup import filter_unseen, recently_alerted
 from catalysts.iv_rank import compute_atm_avg_iv, compute_iv_rank
+from catalysts.market_status import is_market_open
 from catalysts.options_score import rank_contracts
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
 from alerts import dispatcher
@@ -32,6 +33,10 @@ def _to_reranked_kw_only(s: ScoredItem) -> RerankedItem:
 
 def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     if not os.environ.get("POLYGON_API_KEY"):
+        return {}
+
+    if not is_market_open():
+        log.info("market closed, skipping options fetch")
         return {}
 
     now_str = datetime.now(timezone.utc).isoformat(timespec="seconds")
