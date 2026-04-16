@@ -3,16 +3,25 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 
+_SHARED_ENV = Path.home() / ".secrets" / "shared.env"
+
 from catalysts import db as cdb
-from catalysts import edgar, news, score, rerank
+from catalysts import edgar, news, score, rerank, options
 from catalysts.dedup import filter_unseen, recently_alerted
+from catalysts.iv_rank import compute_atm_avg_iv, compute_iv_rank
+from catalysts.options_score import rank_contracts
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
 from alerts import dispatcher
+
+log = logging.getLogger("poller")
 
 
 def _to_reranked_kw_only(s: ScoredItem) -> RerankedItem:
@@ -21,7 +30,74 @@ def _to_reranked_kw_only(s: ScoredItem) -> RerankedItem:
     )
 
 
+def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
+    if not os.environ.get("POLYGON_API_KEY"):
+        return {}
+
+    now_str = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    summaries: dict[str, str] = {}
+
+    cdb.clear_stale_options(conn)
+
+    all_contracts = options.fetch_chains_batch(tickers, delay=0.1)
+    if not all_contracts:
+        return {}
+
+    by_ticker: dict[str, list] = {}
+    for c in all_contracts:
+        by_ticker.setdefault(c.ticker, []).append(c)
+
+    for ticker, contracts in by_ticker.items():
+        underlying = contracts[0].underlying_price if contracts else 0.0
+        avg_iv = compute_atm_avg_iv(contracts, underlying)
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        iv_rank_val = 50.0
+        if avg_iv is not None:
+            cdb.upsert_iv_history(conn, ticker, today_str, avg_iv)
+            history_rows = conn.execute(
+                "SELECT avg_iv FROM iv_history WHERE ticker=? ORDER BY date",
+                (ticker,),
+            ).fetchall()
+            history = [r["avg_iv"] for r in history_rows]
+            iv_rank_val = compute_iv_rank(avg_iv, history)
+
+        cat_row = conn.execute(
+            "SELECT MAX(final_score) AS best FROM catalysts "
+            "WHERE ticker=? AND datetime(fetched_at) >= datetime('now', '-24 hours')",
+            (ticker,),
+        ).fetchone()
+        catalyst_score = cat_row["best"] if cat_row and cat_row["best"] else 0
+
+        ranked = rank_contracts(contracts, catalyst_score=catalyst_score, iv_rank=iv_rank_val)
+        for row in ranked:
+            row["fetched_at"] = now_str
+            cdb.upsert_option_snapshot(conn, row)
+
+        if ranked:
+            best = ranked[0]
+            exp_short = best["expiration_date"][5:]  # MM-DD
+            ct = "C" if best["contract_type"] == "call" else "P"
+            n_calls = sum(1 for r in ranked if r["contract_type"] == "call")
+            n_puts = sum(1 for r in ranked if r["contract_type"] == "put")
+            parts = []
+            if n_calls:
+                parts.append(f"{n_calls} call{'s' if n_calls != 1 else ''}")
+            if n_puts:
+                parts.append(f"{n_puts} put{'s' if n_puts != 1 else ''}")
+            summaries[ticker] = (
+                f"Options: {' + '.join(parts)} under $2 | "
+                f"best: {exp_short} ${best['strike']}{ct} @ ${best['ask']:.2f} "
+                f"(leverage {best['leverage_ratio']:.1f}x, IV rank {iv_rank_val:.0f}%)"
+            )
+
+    cdb.prune_iv_history(conn)
+    return summaries
+
+
 def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
+    if _SHARED_ENV.exists():
+        load_dotenv(_SHARED_ENV)
     load_dotenv()
     conn = cdb.connect(cdb.DB_PATH)
     cdb.migrate(conn)
@@ -53,9 +129,19 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         ], indent=2))
         return 0
 
-    alerts_sent = 0
+    alert_tickers = set()
+    persisted: list[tuple[RerankedItem, int]] = []
     for item in reranked:
         cid = cdb.persist_catalyst(conn, item)
+        persisted.append((item, cid))
+        if item.final_score >= 70 and item.llm_score is not None:
+            alert_tickers.add(item.ticker)
+
+    options_summaries = _fetch_options(conn, tickers)
+    print(f"[poller] options summaries for {len(options_summaries)} tickers")
+
+    alerts_sent = 0
+    for item, cid in persisted:
         should_alert = force_alert or (
             item.final_score >= 70 and item.llm_score is not None
         )
@@ -64,7 +150,8 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         bucket = item.final_score // 10
         if recently_alerted(conn, item.ticker, bucket, hours=6):
             continue
-        ok, channels = dispatcher.send(item)
+        summary = options_summaries.get(item.ticker)
+        ok, channels = dispatcher.send(item, options_summary=summary)
         sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.execute(
             "INSERT INTO alert_log(catalyst_id,ticker,score_bucket,channels,sent_at,ok) "

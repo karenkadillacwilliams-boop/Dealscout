@@ -50,6 +50,40 @@ CREATE TABLE IF NOT EXISTS universe (
     added_at   TEXT NOT NULL,
     active     INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS options_snapshot (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker           TEXT    NOT NULL,
+    contract_ticker  TEXT    NOT NULL UNIQUE,
+    contract_type    TEXT    NOT NULL,
+    strike           REAL    NOT NULL,
+    expiration_date  TEXT    NOT NULL,
+    dte              INTEGER NOT NULL,
+    ask              REAL    NOT NULL,
+    bid              REAL    NOT NULL,
+    mid              REAL    NOT NULL,
+    volume           INTEGER NOT NULL DEFAULT 0,
+    open_interest    INTEGER NOT NULL DEFAULT 0,
+    iv               REAL,
+    delta            REAL,
+    gamma            REAL,
+    theta            REAL,
+    vega             REAL,
+    underlying_price REAL    NOT NULL,
+    leverage_ratio   REAL    NOT NULL,
+    iv_rank          REAL,
+    composite_score  REAL    NOT NULL,
+    fetched_at       TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_opts_ticker    ON options_snapshot(ticker);
+CREATE INDEX IF NOT EXISTS idx_opts_composite ON options_snapshot(composite_score DESC);
+
+CREATE TABLE IF NOT EXISTS iv_history (
+    ticker  TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    avg_iv  REAL NOT NULL,
+    UNIQUE(ticker, date)
+);
 """
 
 
@@ -141,3 +175,76 @@ def unseen_alert_count(conn: sqlite3.Connection) -> int:
 def last_poll_time(conn: sqlite3.Connection) -> str | None:
     row = conn.execute("SELECT MAX(fetched_at) FROM catalysts").fetchone()
     return row[0]
+
+
+def upsert_option_snapshot(conn: sqlite3.Connection, row: dict) -> None:
+    conn.execute(
+        """INSERT INTO options_snapshot
+           (ticker, contract_ticker, contract_type, strike, expiration_date, dte,
+            ask, bid, mid, volume, open_interest, iv, delta, gamma, theta, vega,
+            underlying_price, leverage_ratio, iv_rank, composite_score, fetched_at)
+           VALUES(:ticker,:contract_ticker,:contract_type,:strike,:expiration_date,:dte,
+                  :ask,:bid,:mid,:volume,:open_interest,:iv,:delta,:gamma,:theta,:vega,
+                  :underlying_price,:leverage_ratio,:iv_rank,:composite_score,:fetched_at)
+           ON CONFLICT(contract_ticker) DO UPDATE SET
+              ask=excluded.ask, bid=excluded.bid, mid=excluded.mid,
+              volume=excluded.volume, open_interest=excluded.open_interest,
+              iv=excluded.iv, delta=excluded.delta, gamma=excluded.gamma,
+              theta=excluded.theta, vega=excluded.vega,
+              underlying_price=excluded.underlying_price,
+              leverage_ratio=excluded.leverage_ratio,
+              iv_rank=excluded.iv_rank, composite_score=excluded.composite_score,
+              fetched_at=excluded.fetched_at""",
+        row,
+    )
+    conn.commit()
+
+
+def upsert_iv_history(conn: sqlite3.Connection, ticker: str, date: str, avg_iv: float) -> None:
+    conn.execute(
+        "INSERT INTO iv_history(ticker, date, avg_iv) VALUES(?,?,?) "
+        "ON CONFLICT(ticker, date) DO UPDATE SET avg_iv=excluded.avg_iv",
+        (ticker, date, avg_iv),
+    )
+    conn.commit()
+
+
+def prune_iv_history(conn: sqlite3.Connection, keep_days: int = 60) -> None:
+    conn.execute(
+        "DELETE FROM iv_history WHERE date < date('now', ?)",
+        (f"-{keep_days} days",),
+    )
+    conn.commit()
+
+
+def load_options_for_ticker(conn: sqlite3.Connection, ticker: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM options_snapshot WHERE ticker=? ORDER BY composite_score DESC",
+        (ticker,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def load_all_options(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM options_snapshot ORDER BY composite_score DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def options_badge_counts(conn: sqlite3.Connection, ticker: str) -> tuple[int, int]:
+    row = conn.execute(
+        "SELECT "
+        "SUM(CASE WHEN contract_type='call' THEN 1 ELSE 0 END) AS calls, "
+        "SUM(CASE WHEN contract_type='put' THEN 1 ELSE 0 END) AS puts "
+        "FROM options_snapshot WHERE ticker=?",
+        (ticker,),
+    ).fetchone()
+    return (row["calls"] or 0, row["puts"] or 0)
+
+
+def clear_stale_options(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "DELETE FROM options_snapshot WHERE date(expiration_date) < date('now') OR dte < 7"
+    )
+    conn.commit()

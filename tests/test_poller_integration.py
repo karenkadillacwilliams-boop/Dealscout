@@ -20,7 +20,7 @@ def _stub_rerank(monkeypatch):
 
 def _stub_alerts(monkeypatch, calls):
     monkeypatch.setattr(dispatcher, "send",
-                        lambda item: (calls.append(item) or (True, ["stub"])))
+                        lambda item, **kw: (calls.append(item) or (True, ["stub"])))
 
 
 def test_end_to_end_idempotent(monkeypatch, tmp_path):
