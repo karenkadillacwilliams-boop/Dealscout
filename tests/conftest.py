@@ -24,3 +24,4 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.test/webhook")
     monkeypatch.setenv("MAX_RERANK_CALLS_PER_DAY", "200")
     monkeypatch.setenv("SEC_USER_AGENT", "Dealscout-Test/1.0")
+    monkeypatch.setenv("POLYGON_API_KEY", "test-polygon-key")

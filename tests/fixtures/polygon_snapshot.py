@@ -1,0 +1,81 @@
+"""Canned Polygon options snapshot responses for testing."""
+
+AAPL_SNAPSHOT = {
+    "status": "OK",
+    "results": [
+        {
+            "details": {
+                "ticker": "O:AAPL260425C00200000",
+                "contract_type": "call",
+                "strike_price": 200.0,
+                "expiration_date": "2026-04-25",
+            },
+            "underlying_asset": {"price": 195.0, "ticker": "AAPL"},
+            "day": {"open": 1.50, "high": 1.60, "low": 1.35, "close": 1.50,
+                    "volume": 500, "vwap": 1.48},
+            "last_quote": {"ask": 1.55, "bid": 1.45, "ask_size": 10, "bid_size": 8},
+            "open_interest": 2000,
+            "implied_volatility": 0.42,
+            "greeks": {"delta": 0.35, "gamma": 0.02, "theta": -0.05, "vega": 0.10},
+        },
+        {
+            "details": {
+                "ticker": "O:AAPL260425P00180000",
+                "contract_type": "put",
+                "strike_price": 180.0,
+                "expiration_date": "2026-04-25",
+            },
+            "underlying_asset": {"price": 195.0, "ticker": "AAPL"},
+            "day": {"open": 0.80, "high": 0.90, "low": 0.75, "close": 0.85,
+                    "volume": 300, "vwap": 0.82},
+            "last_quote": {"ask": 0.90, "bid": 0.80, "ask_size": 20, "bid_size": 15},
+            "open_interest": 1500,
+            "implied_volatility": 0.38,
+            "greeks": {"delta": -0.20, "gamma": 0.015, "theta": -0.04, "vega": 0.08},
+        },
+        {
+            "details": {
+                "ticker": "O:AAPL260425C00250000",
+                "contract_type": "call",
+                "strike_price": 250.0,
+                "expiration_date": "2026-04-25",
+            },
+            "underlying_asset": {"price": 195.0, "ticker": "AAPL"},
+            "day": {"open": 3.00, "high": 3.20, "low": 2.90, "close": 3.10,
+                    "volume": 100, "vwap": 3.05},
+            "last_quote": {"ask": 3.15, "bid": 3.00, "ask_size": 5, "bid_size": 3},
+            "open_interest": 800,
+            "implied_volatility": 0.55,
+            "greeks": {"delta": 0.15, "gamma": 0.01, "theta": -0.03, "vega": 0.06},
+        },
+        {
+            "details": {
+                "ticker": "O:AAPL260425C00210000",
+                "contract_type": "call",
+                "strike_price": 210.0,
+                "expiration_date": "2026-04-25",
+            },
+            "underlying_asset": {"price": 195.0, "ticker": "AAPL"},
+            "day": {"open": 0.30, "high": 0.35, "low": 0.25, "close": 0.30,
+                    "volume": 1200, "vwap": 0.30},
+            "last_quote": {"ask": 0.35, "bid": 0.25, "ask_size": 50, "bid_size": 40},
+            "open_interest": 5000,
+            "implied_volatility": 0.40,
+            "greeks": {"delta": 0.12, "gamma": 0.008, "theta": -0.02, "vega": 0.04},
+        },
+        {
+            "details": {
+                "ticker": "O:AAPL260425C00205000",
+                "contract_type": "call",
+                "strike_price": 205.0,
+                "expiration_date": "2026-04-25",
+            },
+            "underlying_asset": {"price": 195.0, "ticker": "AAPL"},
+            "day": {"volume": 0},
+            "last_quote": {},
+            "open_interest": 100,
+            "implied_volatility": None,
+            "greeks": {},
+        },
+    ],
+}
