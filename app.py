@@ -20,12 +20,15 @@ cdb.seed_universe_if_empty(_conn, TICKERS)
 ACTIVE_TICKERS = cdb.load_active_universe(_conn) or TICKERS
 _unseen = cdb.unseen_alert_count(_conn)
 _last_poll = cdb.last_poll_time(_conn)
+_total_opts = _conn.execute("SELECT COUNT(*) FROM options_snapshot").fetchone()[0]
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 Dealscout")
-_badge = f" 🔴 {_unseen}" if _unseen else ""
+_cat_badge = f" 🔴 {_unseen}" if _unseen else ""
+_opt_badge = f" ({_total_opts})" if _total_opts else ""
 page = st.sidebar.radio("Navigate",
-    ["Dashboard", "Catalysts" + _badge, "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
+    ["Dashboard", "Catalysts" + _cat_badge, "Options Pulse" + _opt_badge,
+     "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
 st.sidebar.caption(f"Universe: {len(ACTIVE_TICKERS)} tickers")
 st.sidebar.caption(f"Last catalyst poll: {_last_poll or '—'}")
 if st.sidebar.button("🔄 Refresh prices"):
@@ -69,15 +72,34 @@ if page == "Dashboard":
         ).fetchall()
         cat_map = {r["ticker"]: r["cat"] for r in cat_rows}
         view["catalyst"] = view["ticker"].map(cat_map).fillna(0).astype(int)
+
+        def _opts_badge(ticker):
+            r = _conn.execute(
+                "SELECT "
+                "SUM(CASE WHEN contract_type='call' THEN 1 ELSE 0 END) AS c, "
+                "SUM(CASE WHEN contract_type='put' THEN 1 ELSE 0 END) AS p "
+                "FROM options_snapshot WHERE ticker=?", (ticker,)
+            ).fetchone()
+            c, p = (r["c"] or 0), (r["p"] or 0)
+            if c + p == 0:
+                return "—"
+            parts = []
+            if c:
+                parts.append(f"{c}C")
+            if p:
+                parts.append(f"{p}P")
+            return " ".join(parts)
+
+        view["options"] = view["ticker"].map(_opts_badge)
         view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
         view = view.rename(columns={
             "ticker": "Ticker", "name": "Name", "last": "Last",
             "daily_pct": "Daily %", "weekly_pct": "Weekly %",
             "monthly_pct": "Monthly %", "grade": "Grade",
-            "catalyst": "Catalyst",
+            "catalyst": "Catalyst", "options": "Options",
         })
         st.dataframe(
-            view.style.format({
+            view[["Ticker", "Name", "Last", "Daily %", "Weekly %", "Monthly %", "Grade", "Catalyst", "Options"]].style.format({
                 "Last": "${:,.2f}",
                 "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%", "Monthly %": "{:+.2f}%",
                 "Catalyst": "{:d}",
@@ -300,6 +322,80 @@ elif page.startswith("Catalysts"):
         if heat:
             hdf = pd.DataFrame([dict(r) for r in heat]).set_index("ticker")
             st.bar_chart(hdf)
+
+elif page.startswith("Options Pulse"):
+    st.title("Options Pulse")
+    st.caption("Cheap convexity screener — calls & puts under $2, 7-28 DTE, ranked by catalyst-weighted leverage + IV rank.")
+
+    opts_rows = cdb.load_all_options(_conn)
+    if not opts_rows:
+        st.info("No qualifying options found. Run the poller with POLYGON_API_KEY set.")
+    else:
+        import pandas as pd
+        opts_df = pd.DataFrame(opts_rows)
+
+        # Filters
+        c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+        with c1:
+            all_tickers = sorted(opts_df["ticker"].unique())
+            sel_tickers = st.multiselect("Ticker", options=all_tickers, default=all_tickers)
+        with c2:
+            sel_type = st.selectbox("Type", ["All", "call", "put"])
+        with c3:
+            sel_dte = st.slider("Max DTE", 7, 28, 28)
+        with c4:
+            sel_ask = st.slider("Max ask ($)", 0.05, 2.00, 2.00, 0.05)
+
+        mask = opts_df["ticker"].isin(sel_tickers)
+        if sel_type != "All":
+            mask &= opts_df["contract_type"] == sel_type
+        mask &= opts_df["dte"] <= sel_dte
+        mask &= opts_df["ask"] <= sel_ask
+        filtered = opts_df[mask].copy()
+
+        # Summary row
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Qualifying contracts", len(filtered))
+        cheap_vol = filtered[filtered["iv_rank"] < 30]["ticker"].nunique() if not filtered.empty else 0
+        s2.metric("Cheap vol tickers (IV rank < 30)", cheap_vol)
+        if not filtered.empty:
+            s3.metric("Best composite", f"{filtered['composite_score'].max():.1f}")
+
+        # Main table
+        if filtered.empty:
+            st.info("No contracts match current filters.")
+        else:
+            display = filtered[[
+                "ticker", "contract_type", "strike", "expiration_date", "dte",
+                "ask", "leverage_ratio", "iv", "iv_rank", "composite_score",
+                "volume", "open_interest",
+            ]].rename(columns={
+                "ticker": "Ticker", "contract_type": "Type", "strike": "Strike",
+                "expiration_date": "Exp", "dte": "DTE", "ask": "Ask",
+                "leverage_ratio": "Leverage", "iv": "IV", "iv_rank": "IV Rank",
+                "composite_score": "Composite", "volume": "Volume",
+                "open_interest": "OI",
+            })
+
+            def _iv_color(val):
+                if pd.isna(val):
+                    return ""
+                if val < 30:
+                    return "background-color: #d4edda"
+                if val <= 60:
+                    return "background-color: #fff3cd"
+                return "background-color: #f8d7da"
+
+            st.dataframe(
+                display.style
+                    .format({
+                        "Strike": "${:,.2f}", "Ask": "${:,.2f}",
+                        "Leverage": "{:.1f}x", "IV": "{:.1%}",
+                        "IV Rank": "{:.0f}%", "Composite": "{:.1f}",
+                    })
+                    .map(_iv_color, subset=["IV Rank"]),
+                width="stretch", hide_index=True,
+            )
 
 elif page == "Universe":
     import re
