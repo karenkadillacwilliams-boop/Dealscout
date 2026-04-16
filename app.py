@@ -91,17 +91,26 @@ if page == "Dashboard":
             return " ".join(parts)
 
         view["options"] = view["ticker"].map(_opts_badge)
+
+        entry_rows = _conn.execute(
+            "SELECT ticker, added_at FROM universe WHERE active=1"
+        ).fetchall()
+        entry_map = {r["ticker"]: r["added_at"][:10] for r in entry_rows}
+        view["entry"] = view["ticker"].map(entry_map).fillna("—")
+
         view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
         view = view.rename(columns={
             "ticker": "Ticker", "name": "Name", "last": "Last",
             "daily_pct": "Daily %", "weekly_pct": "Weekly %",
-            "monthly_pct": "Monthly %", "grade": "Grade",
-            "catalyst": "Catalyst", "options": "Options",
+            "monthly_pct": "Monthly %", "ytd_pct": "YTD %",
+            "grade": "Grade", "catalyst": "Catalyst",
+            "options": "Options", "entry": "Entry",
         })
         st.dataframe(
-            view[["Ticker", "Name", "Last", "Daily %", "Weekly %", "Monthly %", "Grade", "Catalyst", "Options"]].style.format({
+            view[["Ticker", "Name", "Last", "Daily %", "Weekly %", "Monthly %", "YTD %", "Grade", "Catalyst", "Options", "Entry"]].style.format({
                 "Last": "${:,.2f}",
-                "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%", "Monthly %": "{:+.2f}%",
+                "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%",
+                "Monthly %": "{:+.2f}%", "YTD %": "{:+.2f}%",
                 "Catalyst": "{:d}",
             }),
             width="stretch", hide_index=True,

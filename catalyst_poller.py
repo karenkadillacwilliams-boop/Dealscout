@@ -137,7 +137,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if item.final_score >= 70 and item.llm_score is not None:
             alert_tickers.add(item.ticker)
 
-    options_summaries = _fetch_options(conn, list(alert_tickers)) if alert_tickers else {}
+    options_summaries = _fetch_options(conn, tickers)
     print(f"[poller] options summaries for {len(options_summaries)} tickers")
 
     alerts_sent = 0

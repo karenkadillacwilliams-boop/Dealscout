@@ -37,7 +37,7 @@ def fetch_history(tickers: list[str], period: str = "6mo") -> pd.DataFrame:
 def period_returns(prices: pd.DataFrame) -> pd.DataFrame:
     """Compute daily / weekly / monthly % return for each ticker from a price history frame."""
     if prices.empty:
-        return pd.DataFrame(columns=["ticker", "last", "daily_pct", "weekly_pct", "monthly_pct"])
+        return pd.DataFrame(columns=["ticker", "last", "daily_pct", "weekly_pct", "monthly_pct", "ytd_pct"])
 
     rows = []
     for ticker in prices.columns:
@@ -51,8 +51,20 @@ def period_returns(prices: pd.DataFrame) -> pd.DataFrame:
             "daily_pct":   _pct_change(series, 1),
             "weekly_pct":  _pct_change(series, 5),
             "monthly_pct": _pct_change(series, 21),
+            "ytd_pct":     _ytd_change(series),
         })
     return pd.DataFrame(rows)
+
+
+def _ytd_change(series: pd.Series) -> float:
+    current_year = series.index[-1].year
+    year_start = series.loc[series.index.year == current_year]
+    if year_start.empty or len(year_start) < 2:
+        return float("nan")
+    first = float(year_start.iloc[0])
+    if first == 0:
+        return float("nan")
+    return (float(series.iloc[-1]) / first - 1.0) * 100.0
 
 
 def _pct_change(series: pd.Series, lookback_bars: int) -> float:
