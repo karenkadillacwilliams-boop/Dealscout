@@ -1,7 +1,12 @@
 """IV history tracking and IV rank computation."""
 from __future__ import annotations
 
+import math
+import os
+from datetime import date, timedelta
 from typing import Optional, Sequence
+
+import requests
 
 from catalysts.options import OptionContract
 
@@ -33,3 +38,71 @@ def compute_iv_rank(current_iv: float, history: Sequence[float]) -> float:
     below = sum(1 for h in history if h < current_iv)
     equal = sum(1 for h in history if h == current_iv)
     return round((below + 0.5 * equal) / len(history) * 100, 1)
+
+
+def backfill_realized_vol(
+    ticker: str,
+    conn,
+    days: int = 30,
+) -> bool:
+    """Backfill iv_history with realized volatility as IV proxy.
+
+    Skips if the ticker already has >= 5 days of iv_history.
+    Returns True if backfill was performed.
+    """
+    from catalysts.db import upsert_iv_history
+
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM iv_history WHERE ticker=?", (ticker,)
+    ).fetchone()[0]
+    if existing >= 5:
+        return False
+
+    key = os.environ.get("POLYGON_API_KEY", "")
+    if not key:
+        return False
+
+    end = date.today()
+    start = end - timedelta(days=days + 30)  # extra buffer for weekends/holidays
+
+    try:
+        r = requests.get(
+            f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start.isoformat()}/{end.isoformat()}",
+            params={"adjusted": "true", "sort": "asc", "apiKey": key},
+            timeout=15,
+        )
+        r.raise_for_status()
+        bars = r.json().get("results", [])
+    except Exception:
+        return False
+
+    if len(bars) < 22:
+        return False
+
+    closes = [b["c"] for b in bars]
+    log_returns = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+
+    window = 20
+    for i in range(window, len(log_returns)):
+        segment = log_returns[i - window : i]
+        mean = sum(segment) / window
+        variance = sum((x - mean) ** 2 for x in segment) / (window - 1)
+        realized_vol = math.sqrt(variance) * math.sqrt(252)
+
+        bar_ts = bars[i + 1]["t"]  # +1 because log_returns is offset by 1
+        bar_date = date.fromtimestamp(bar_ts / 1000).isoformat()
+        upsert_iv_history(conn, ticker, bar_date, round(realized_vol, 6))
+
+    return True
+
+
+def backfill_batch(tickers: list[str], conn, delay: float = 0.1) -> int:
+    """Backfill realized vol for all tickers that need it. Returns count of tickers backfilled."""
+    import time
+
+    count = 0
+    for t in tickers:
+        if backfill_realized_vol(t, conn):
+            count += 1
+            time.sleep(delay)
+    return count

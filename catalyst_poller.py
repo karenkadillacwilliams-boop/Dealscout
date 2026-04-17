@@ -150,6 +150,16 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if item.final_score >= 70 and item.llm_score is not None:
             alert_tickers.add(item.ticker)
 
+    # Backfill IV history for new tickers
+    if os.environ.get("POLYGON_API_KEY"):
+        from catalysts.iv_rank import backfill_batch
+        try:
+            n_filled = backfill_batch(tickers, conn, delay=0.1)
+            if n_filled:
+                print(f"[poller] backfilled IV history for {n_filled} tickers")
+        except Exception as exc:
+            print(f"[poller] IV backfill failed: {exc}")
+
     options_summaries = _fetch_options(conn, tickers)
     print(f"[poller] options summaries for {len(options_summaries)} tickers")
 
