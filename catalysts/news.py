@@ -72,3 +72,50 @@ def fetch_yfinance(tickers: Iterable[str]) -> list[RawCatalyst]:
                 headline=title, url=link, published_at=published,
             ))
     return out
+
+
+def fetch_polygon_news(tickers: list[str], limit_per_ticker: int = 10) -> list[RawCatalyst]:
+    """Fetch news from Polygon.io REST API for the given tickers."""
+    import os
+
+    key = os.environ.get("POLYGON_API_KEY", "")
+    if not key:
+        return []
+
+    seen_ids: set[str] = set()
+    results: list[RawCatalyst] = []
+
+    for ticker in tickers:
+        try:
+            r = requests.get(
+                "https://api.polygon.io/v2/reference/news",
+                params={"ticker": ticker, "limit": limit_per_ticker, "apiKey": key},
+                timeout=15,
+            )
+            r.raise_for_status()
+            articles = r.json().get("results", [])
+        except Exception:
+            continue
+
+        for art in articles:
+            art_id = art.get("id", "")
+            if not art_id or art_id in seen_ids:
+                continue
+            seen_ids.add(art_id)
+
+            title = art.get("title", "").strip()
+            url = art.get("article_url", "").strip()
+            pub = art.get("published_utc", "")
+            if not title or not url:
+                continue
+
+            results.append(RawCatalyst(
+                ticker=ticker,
+                source="polygon-news",
+                source_id=f"polygon:{art_id}",
+                headline=title,
+                url=url,
+                published_at=pub,
+            ))
+
+    return results

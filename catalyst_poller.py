@@ -123,6 +123,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     raw += edgar.fetch(tickers, since_hours=2)
     raw += news.fetch_yfinance(tickers)
     raw += news.fetch_gnews_rss(tickers)
+    raw += news.fetch_polygon_news(tickers)
     print(f"[poller] fetched {len(raw)} raw items")
 
     fresh = filter_unseen(conn, raw)
