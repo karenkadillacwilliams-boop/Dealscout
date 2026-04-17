@@ -48,6 +48,13 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     if not all_contracts:
         return {}
 
+    from catalysts.uoa import detect_unusual
+    uoa_signals = detect_unusual(all_contracts)
+    for sig in uoa_signals:
+        cdb.insert_uoa_signal(conn, sig)
+    if uoa_signals:
+        log.info("detected %d UOA signals", len(uoa_signals))
+
     by_ticker: dict[str, list] = {}
     for c in all_contracts:
         by_ticker.setdefault(c.ticker, []).append(c)

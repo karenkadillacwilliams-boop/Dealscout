@@ -499,6 +499,28 @@ elif page.startswith("Options Pulse"):
                 width="stretch", hide_index=True,
             )
 
+        # ── Unusual Options Activity ──
+        st.subheader("Unusual Options Activity (24h)")
+        uoa_rows = cdb.load_uoa_signals(_conn, hours=24)
+        if not uoa_rows:
+            st.info("No unusual activity detected in the last 24 hours.")
+        else:
+            uoa_df = pd.DataFrame(uoa_rows)[[
+                "ticker", "contract_type", "strike", "expiration_date",
+                "volume", "open_interest", "vol_oi_ratio", "ask", "detected_at",
+            ]].rename(columns={
+                "ticker": "Ticker", "contract_type": "Type", "strike": "Strike",
+                "expiration_date": "Exp", "volume": "Volume", "open_interest": "OI",
+                "vol_oi_ratio": "Vol/OI", "ask": "Ask", "detected_at": "Detected",
+            })
+            st.dataframe(
+                uoa_df.style.format({
+                    "Strike": "${:,.2f}", "Ask": "${:,.2f}",
+                    "Vol/OI": "{:.1f}x",
+                }),
+                width="stretch", hide_index=True,
+            )
+
 elif page == "Universe":
     import re
     st.title("Universe")

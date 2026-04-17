@@ -84,6 +84,23 @@ CREATE TABLE IF NOT EXISTS iv_history (
     avg_iv  REAL NOT NULL,
     UNIQUE(ticker, date)
 );
+
+CREATE TABLE IF NOT EXISTS uoa_signals (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker           TEXT    NOT NULL,
+    contract_ticker  TEXT    NOT NULL,
+    contract_type    TEXT    NOT NULL,
+    strike           REAL    NOT NULL,
+    expiration_date  TEXT    NOT NULL,
+    volume           INTEGER NOT NULL,
+    open_interest    INTEGER NOT NULL,
+    vol_oi_ratio     REAL    NOT NULL,
+    ask              REAL,
+    underlying_price REAL,
+    detected_at      TEXT    NOT NULL,
+    UNIQUE(contract_ticker, detected_at)
+);
+CREATE INDEX IF NOT EXISTS idx_uoa_ticker ON uoa_signals(ticker, detected_at DESC);
 """
 
 
@@ -248,3 +265,32 @@ def clear_stale_options(conn: sqlite3.Connection) -> None:
         "DELETE FROM options_snapshot WHERE date(expiration_date) < date('now') OR dte < 7"
     )
     conn.commit()
+
+
+def insert_uoa_signal(conn: sqlite3.Connection, row: dict) -> None:
+    conn.execute(
+        """INSERT OR IGNORE INTO uoa_signals
+           (ticker, contract_ticker, contract_type, strike, expiration_date,
+            volume, open_interest, vol_oi_ratio, ask, underlying_price, detected_at)
+           VALUES(:ticker,:contract_ticker,:contract_type,:strike,:expiration_date,
+                  :volume,:open_interest,:vol_oi_ratio,:ask,:underlying_price,:detected_at)""",
+        row,
+    )
+    conn.commit()
+
+
+def load_uoa_signals(conn: sqlite3.Connection, hours: int = 24) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM uoa_signals WHERE datetime(detected_at) >= datetime('now', ?) "
+        "ORDER BY vol_oi_ratio DESC",
+        (f"-{hours} hours",),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def uoa_count_for_ticker(conn: sqlite3.Connection, ticker: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM uoa_signals WHERE ticker=? "
+        "AND datetime(detected_at) >= datetime('now', '-24 hours')",
+        (ticker,),
+    ).fetchone()[0]
