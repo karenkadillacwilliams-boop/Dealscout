@@ -8,7 +8,8 @@ NAME = "discord"
 
 
 def send(*, subject: str, headline: str, rationale: str | None, url: str,
-         source: str, published_at: str, options_summary: str | None = None, **_) -> None:
+         source: str, published_at: str, options_summary: str | None = None,
+         related_tickers: str | None = None, **_) -> None:
     if not os.environ.get("DISCORD_WEBHOOK_URL"):
         raise RuntimeError("discord channel missing env var: DISCORD_WEBHOOK_URL")
     webhook = os.environ["DISCORD_WEBHOOK_URL"]
@@ -19,6 +20,8 @@ def send(*, subject: str, headline: str, rationale: str | None, url: str,
     ]
     if options_summary:
         fields.append({"name": "Options", "value": options_summary[:900]})
+    if related_tickers:
+        fields.append({"name": "Related", "value": related_tickers[:900]})
 
     payload = {
         "embeds": [{

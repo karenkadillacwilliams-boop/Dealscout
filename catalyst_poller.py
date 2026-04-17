@@ -176,7 +176,11 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if recently_alerted(conn, item.ticker, bucket, hours=6):
             continue
         summary = options_summaries.get(item.ticker)
-        ok, channels = dispatcher.send(item, options_summary=summary)
+        from catalysts.related import fetch_related
+        related = fetch_related(item.ticker, limit=5)
+        related = [r for r in related if r in set(tickers)]
+        related_str = f"Related: {', '.join(related)}" if related else None
+        ok, channels = dispatcher.send(item, options_summary=summary, related_tickers=related_str)
         sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.execute(
             "INSERT INTO alert_log(catalyst_id,ticker,score_bucket,channels,sent_at,ok) "
