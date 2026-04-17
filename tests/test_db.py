@@ -117,3 +117,12 @@ def test_insert_and_load_uoa(tmp_db):
     rows = cdb.load_uoa_signals(tmp_db, hours=24)
     assert len(rows) == 1
     assert rows[0]["vol_oi_ratio"] == 6.25
+
+
+def test_technicals_table_and_upsert(tmp_db):
+    from catalysts import db as cdb
+    cdb.migrate(tmp_db)
+    cdb.upsert_technical(tmp_db, "AAPL", 55.0, 1.2, 3.5, "Bullish", 2)
+    data = cdb.load_technicals(tmp_db)
+    assert data["AAPL"]["label"] == "Bullish"
+    assert data["AAPL"]["score"] == 2

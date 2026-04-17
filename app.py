@@ -145,6 +145,12 @@ if page == "Dashboard":
         entry_map = {r["ticker"]: r["added_at"][:10] for r in entry_rows}
         view["entry"] = view["ticker"].map(entry_map).fillna("—")
 
+        tech_data = cdb.load_technicals(_conn)
+        def _tech_label(ticker):
+            t = tech_data.get(ticker)
+            return t["label"] if t else "—"
+        view["tech"] = view["ticker"].map(_tech_label)
+
         view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
         view = view.rename(columns={
             "ticker": "Ticker", "name": "Name", "last": "Last",
@@ -153,11 +159,12 @@ if page == "Dashboard":
             "grade": "Grade", "catalyst": "Catalyst",
             "options": "Options", "iv_rank": "IV Rank",
             "earnings_dte": "Earn DTE", "entry": "Entry",
+            "tech": "Tech",
         })
 
         _display_cols = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
-                         "Monthly %", "YTD %", "Grade", "Catalyst", "Options",
-                         "IV Rank", "Earn DTE", "Entry"]
+                         "Monthly %", "YTD %", "Grade", "Tech", "Catalyst",
+                         "Options", "IV Rank", "Earn DTE", "Entry"]
 
         def _pct_bar(val):
             if pd.isna(val):
@@ -184,6 +191,13 @@ if page == "Dashboard":
                 return "color: #fd7e14"
             return ""
 
+        def _tech_color(val):
+            if val == "Bullish":
+                return "color: #28a745; font-weight: bold"
+            if val == "Bearish":
+                return "color: #dc3545; font-weight: bold"
+            return ""
+
         styled = (
             view[_display_cols].style
             .format({
@@ -197,6 +211,7 @@ if page == "Dashboard":
             .map(_pct_bar, subset=["Daily %", "Weekly %", "Monthly %", "YTD %"])
             .map(_ivr_color, subset=["IV Rank"])
             .map(_dte_color, subset=["Earn DTE"])
+            .map(_tech_color, subset=["Tech"])
         )
         st.dataframe(styled, width="stretch", hide_index=True)
 

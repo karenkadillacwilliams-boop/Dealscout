@@ -152,6 +152,18 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     options_summaries = _fetch_options(conn, tickers)
     print(f"[poller] options summaries for {len(options_summaries)} tickers")
 
+    # Technical confluence scoring
+    if os.environ.get("POLYGON_API_KEY"):
+        from catalysts.technicals import fetch_technicals_batch
+        try:
+            tech_map = fetch_technicals_batch(tickers, prices=None, delay=0.05)
+            for t, sig in tech_map.items():
+                cdb.upsert_technical(conn, t, sig.rsi, sig.macd_histogram,
+                                     sig.price_vs_sma50, sig.label, sig.score)
+            print(f"[poller] technicals updated for {len(tech_map)} tickers")
+        except Exception as exc:
+            print(f"[poller] technicals failed: {exc}")
+
     alerts_sent = 0
     for item, cid in persisted:
         should_alert = force_alert or (

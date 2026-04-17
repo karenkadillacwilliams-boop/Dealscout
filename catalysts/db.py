@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS uoa_signals (
     UNIQUE(contract_ticker, detected_at)
 );
 CREATE INDEX IF NOT EXISTS idx_uoa_ticker ON uoa_signals(ticker, detected_at DESC);
+
+CREATE TABLE IF NOT EXISTS technicals (
+    ticker          TEXT PRIMARY KEY,
+    rsi             REAL,
+    macd_histogram  REAL,
+    price_vs_sma50  REAL,
+    label           TEXT NOT NULL,
+    score           INTEGER NOT NULL,
+    updated_at      TEXT NOT NULL
+);
 """
 
 
@@ -294,3 +304,29 @@ def uoa_count_for_ticker(conn: sqlite3.Connection, ticker: str) -> int:
         "AND datetime(detected_at) >= datetime('now', '-24 hours')",
         (ticker,),
     ).fetchone()[0]
+
+
+def upsert_technical(
+    conn: sqlite3.Connection,
+    ticker: str,
+    rsi,
+    macd_histogram,
+    price_vs_sma50,
+    label: str,
+    score: int,
+) -> None:
+    conn.execute(
+        """INSERT INTO technicals(ticker, rsi, macd_histogram, price_vs_sma50, label, score, updated_at)
+           VALUES(?,?,?,?,?,?,datetime('now'))
+           ON CONFLICT(ticker) DO UPDATE SET
+              rsi=excluded.rsi, macd_histogram=excluded.macd_histogram,
+              price_vs_sma50=excluded.price_vs_sma50, label=excluded.label,
+              score=excluded.score, updated_at=excluded.updated_at""",
+        (ticker, rsi, macd_histogram, price_vs_sma50, label, score),
+    )
+    conn.commit()
+
+
+def load_technicals(conn: sqlite3.Connection) -> dict[str, dict]:
+    rows = conn.execute("SELECT * FROM technicals").fetchall()
+    return {r["ticker"]: dict(r) for r in rows}
