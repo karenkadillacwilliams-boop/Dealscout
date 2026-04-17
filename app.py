@@ -28,7 +28,7 @@ _cat_badge = f" 🔴 {_unseen}" if _unseen else ""
 _opt_badge = f" ({_total_opts})" if _total_opts else ""
 page = st.sidebar.radio("Navigate",
     ["Dashboard", "Catalysts" + _cat_badge, "Options Pulse" + _opt_badge,
-     "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
+     "Power Gauge", "Holdings", "Trades", "Performance", "IPO Tracker", "Universe"])
 st.sidebar.caption(f"Universe: {len(ACTIVE_TICKERS)} tickers")
 st.sidebar.caption(f"Last catalyst poll: {_last_poll or '—'}")
 if st.sidebar.button("🔄 Refresh prices"):
@@ -547,6 +547,57 @@ elif page.startswith("Options Pulse"):
                 }).map(_color_flow, subset=["Flow"]),
                 width="stretch", hide_index=True,
             )
+
+elif page == "IPO Tracker":
+    from datetime import date, timedelta
+    st.title("IPO Tracker")
+    st.caption("Recently listed stocks from the last 90 days via Polygon.")
+
+    from catalysts.ipo import fetch_recent_ipos
+
+    @st.cache_data(ttl=3600, show_spinner="Fetching recent IPOs...")
+    def _load_ipos():
+        return fetch_recent_ipos(lookback_days=90)
+
+    ipos = _load_ipos()
+    if not ipos:
+        st.info("No recent IPOs found or POLYGON_API_KEY not set.")
+    else:
+        import pandas as pd
+        ipo_df = pd.DataFrame([{
+            "Ticker": e.ticker,
+            "Name": e.name,
+            "List Date": e.list_date,
+            "Exchange": e.primary_exchange,
+        } for e in ipos])
+
+        # Summary
+        c1, c2 = st.columns(2)
+        c1.metric("Recent IPOs (90d)", len(ipo_df))
+        week_ago = (date.today() - timedelta(days=7)).isoformat()
+        recent_count = len(ipo_df[ipo_df["List Date"] >= week_ago])
+        c2.metric("Last 7 days", recent_count)
+
+        # Filter
+        search = st.text_input("Search IPOs", placeholder="Filter by ticker or name").strip().upper()
+        if search:
+            ipo_df = ipo_df[
+                ipo_df["Ticker"].str.contains(search, na=False) |
+                ipo_df["Name"].str.upper().str.contains(search, na=False)
+            ]
+
+        st.dataframe(ipo_df, use_container_width=True, hide_index=True)
+
+        # Add to universe
+        st.subheader("Add IPO to watchlist")
+        ipo_tickers = sorted(ipo_df["Ticker"].tolist())
+        if ipo_tickers:
+            selected = st.selectbox("Select ticker", options=ipo_tickers)
+            if st.button("Add to Universe", type="primary"):
+                from catalysts import db as cdb
+                cdb.upsert_universe(_conn, selected)
+                st.success(f"Added {selected} to universe")
+                st.rerun()
 
 elif page == "Universe":
     import re
