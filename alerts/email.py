@@ -12,7 +12,8 @@ _REQUIRED_ENV = ("GMAIL_USER", "GMAIL_APP_PW", "ALERT_TO_EMAIL")
 
 
 def send(*, subject: str, headline: str, rationale: str | None, url: str,
-         source: str, published_at: str, options_summary: str | None = None, **_) -> None:
+         source: str, published_at: str, options_summary: str | None = None,
+         related_tickers: str | None = None, **_) -> None:
     missing = [k for k in _REQUIRED_ENV if not os.environ.get(k)]
     if missing:
         raise RuntimeError(f"email channel missing env vars: {', '.join(missing)}")
@@ -32,6 +33,8 @@ def send(*, subject: str, headline: str, rationale: str | None, url: str,
     )
     if options_summary:
         body += f"\n{options_summary}\n"
+    if related_tickers:
+        body += f"\n{related_tickers}\n"
     msg.set_content(body)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:

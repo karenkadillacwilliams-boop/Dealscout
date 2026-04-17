@@ -28,7 +28,7 @@ _cat_badge = f" 🔴 {_unseen}" if _unseen else ""
 _opt_badge = f" ({_total_opts})" if _total_opts else ""
 page = st.sidebar.radio("Navigate",
     ["Dashboard", "Catalysts" + _cat_badge, "Options Pulse" + _opt_badge,
-     "Power Gauge", "Holdings", "Trades", "Performance", "Universe"])
+     "Power Gauge", "Holdings", "Trades", "Performance", "IPO Tracker", "Universe"])
 st.sidebar.caption(f"Universe: {len(ACTIVE_TICKERS)} tickers")
 st.sidebar.caption(f"Last catalyst poll: {_last_poll or '—'}")
 if st.sidebar.button("🔄 Refresh prices"):
@@ -145,6 +145,12 @@ if page == "Dashboard":
         entry_map = {r["ticker"]: r["added_at"][:10] for r in entry_rows}
         view["entry"] = view["ticker"].map(entry_map).fillna("—")
 
+        tech_data = cdb.load_technicals(_conn)
+        def _tech_label(ticker):
+            t = tech_data.get(ticker)
+            return t["label"] if t else "—"
+        view["tech"] = view["ticker"].map(_tech_label)
+
         view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
         view = view.rename(columns={
             "ticker": "Ticker", "name": "Name", "last": "Last",
@@ -153,11 +159,12 @@ if page == "Dashboard":
             "grade": "Grade", "catalyst": "Catalyst",
             "options": "Options", "iv_rank": "IV Rank",
             "earnings_dte": "Earn DTE", "entry": "Entry",
+            "tech": "Tech",
         })
 
         _display_cols = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
-                         "Monthly %", "YTD %", "Grade", "Catalyst", "Options",
-                         "IV Rank", "Earn DTE", "Entry"]
+                         "Monthly %", "YTD %", "Grade", "Tech", "Catalyst",
+                         "Options", "IV Rank", "Earn DTE", "Entry"]
 
         def _pct_bar(val):
             if pd.isna(val):
@@ -184,6 +191,13 @@ if page == "Dashboard":
                 return "color: #fd7e14"
             return ""
 
+        def _tech_color(val):
+            if val == "Bullish":
+                return "color: #28a745; font-weight: bold"
+            if val == "Bearish":
+                return "color: #dc3545; font-weight: bold"
+            return ""
+
         styled = (
             view[_display_cols].style
             .format({
@@ -197,6 +211,7 @@ if page == "Dashboard":
             .map(_pct_bar, subset=["Daily %", "Weekly %", "Monthly %", "YTD %"])
             .map(_ivr_color, subset=["IV Rank"])
             .map(_dte_color, subset=["Earn DTE"])
+            .map(_tech_color, subset=["Tech"])
         )
         st.dataframe(styled, width="stretch", hide_index=True)
 
@@ -498,6 +513,91 @@ elif page.startswith("Options Pulse"):
                     .map(_iv_color, subset=["IV Rank"]),
                 width="stretch", hide_index=True,
             )
+
+        # ── Unusual Options Activity ──
+        st.subheader("Unusual Options Activity (24h)")
+        uoa_rows = cdb.load_uoa_signals(_conn, hours=24)
+        if not uoa_rows:
+            st.info("No unusual activity detected in the last 24 hours.")
+        else:
+            _flow_cols = ["ticker", "contract_type", "strike", "expiration_date",
+                          "volume", "open_interest", "vol_oi_ratio", "ask", "flow_type", "detected_at"]
+            # flow_type may be missing from older DB rows — fill with 'normal'
+            uoa_df = pd.DataFrame(uoa_rows)
+            if "flow_type" not in uoa_df.columns:
+                uoa_df["flow_type"] = "normal"
+            uoa_df = uoa_df[_flow_cols].rename(columns={
+                "ticker": "Ticker", "contract_type": "Type", "strike": "Strike",
+                "expiration_date": "Exp", "volume": "Volume", "open_interest": "OI",
+                "vol_oi_ratio": "Vol/OI", "ask": "Ask", "flow_type": "Flow",
+                "detected_at": "Detected",
+            })
+
+            def _color_flow(val):
+                if val == "sweep":
+                    return "color: red; font-weight: bold"
+                if val == "block":
+                    return "color: orange"
+                return ""
+
+            st.dataframe(
+                uoa_df.style.format({
+                    "Strike": "${:,.2f}", "Ask": "${:,.2f}",
+                    "Vol/OI": "{:.1f}x",
+                }).map(_color_flow, subset=["Flow"]),
+                width="stretch", hide_index=True,
+            )
+
+elif page == "IPO Tracker":
+    from datetime import date, timedelta
+    st.title("IPO Tracker")
+    st.caption("Recently listed stocks from the last 90 days via Polygon.")
+
+    from catalysts.ipo import fetch_recent_ipos
+
+    @st.cache_data(ttl=3600, show_spinner="Fetching recent IPOs...")
+    def _load_ipos():
+        return fetch_recent_ipos(lookback_days=90)
+
+    ipos = _load_ipos()
+    if not ipos:
+        st.info("No recent IPOs found or POLYGON_API_KEY not set.")
+    else:
+        import pandas as pd
+        ipo_df = pd.DataFrame([{
+            "Ticker": e.ticker,
+            "Name": e.name,
+            "List Date": e.list_date,
+            "Exchange": e.primary_exchange,
+        } for e in ipos])
+
+        # Summary
+        c1, c2 = st.columns(2)
+        c1.metric("Recent IPOs (90d)", len(ipo_df))
+        week_ago = (date.today() - timedelta(days=7)).isoformat()
+        recent_count = len(ipo_df[ipo_df["List Date"] >= week_ago])
+        c2.metric("Last 7 days", recent_count)
+
+        # Filter
+        search = st.text_input("Search IPOs", placeholder="Filter by ticker or name").strip().upper()
+        if search:
+            ipo_df = ipo_df[
+                ipo_df["Ticker"].str.contains(search, na=False) |
+                ipo_df["Name"].str.upper().str.contains(search, na=False)
+            ]
+
+        st.dataframe(ipo_df, use_container_width=True, hide_index=True)
+
+        # Add to universe
+        st.subheader("Add IPO to watchlist")
+        ipo_tickers = sorted(ipo_df["Ticker"].tolist())
+        if ipo_tickers:
+            selected = st.selectbox("Select ticker", options=ipo_tickers)
+            if st.button("Add to Universe", type="primary"):
+                from catalysts import db as cdb
+                cdb.upsert_universe(_conn, selected)
+                st.success(f"Added {selected} to universe")
+                st.rerun()
 
 elif page == "Universe":
     import re

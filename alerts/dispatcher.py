@@ -11,7 +11,8 @@ log = logging.getLogger("alerts")
 _CHANNELS = (email, discord)
 
 
-def send(item: RerankedItem, *, options_summary: str | None = None) -> tuple[bool, list[str]]:
+def send(item: RerankedItem, *, options_summary: str | None = None,
+         related_tickers: str | None = None) -> tuple[bool, list[str]]:
     sent: list[str] = []
     ok = True
     subject = f"[{item.ticker}] {(item.tags[0] if item.tags else 'catalyst')} " \
@@ -26,6 +27,7 @@ def send(item: RerankedItem, *, options_summary: str | None = None) -> tuple[boo
                 source=item.source,
                 published_at=item.published_at,
                 options_summary=options_summary,
+                related_tickers=related_tickers,
             )
             sent.append(channel.NAME)
         except Exception as ex:

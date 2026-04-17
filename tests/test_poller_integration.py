@@ -8,6 +8,7 @@ def _stub_fetchers(monkeypatch, items):
     monkeypatch.setattr(edgar, "fetch", lambda *a, **k: items)
     monkeypatch.setattr(news, "fetch_yfinance", lambda *a, **k: [])
     monkeypatch.setattr(news, "fetch_gnews_rss", lambda *a, **k: [])
+    monkeypatch.setattr(news, "fetch_polygon_news", lambda *a, **k: [])
 
 
 def _stub_rerank(monkeypatch):

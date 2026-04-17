@@ -93,3 +93,37 @@ def test_prune_iv_history(tmp_db):
     cdb.prune_iv_history(tmp_db, keep_days=60)
     n = tmp_db.execute("SELECT COUNT(*) FROM iv_history WHERE ticker='AAPL'").fetchone()[0]
     assert n <= 60
+
+
+def test_uoa_signals_table_exists(tmp_db):
+    from catalysts import db as cdb
+    cdb.migrate(tmp_db)
+    tmp_db.execute("SELECT id, ticker, contract_ticker, contract_type, strike, "
+                   "expiration_date, volume, open_interest, vol_oi_ratio, "
+                   "ask, underlying_price, detected_at FROM uoa_signals LIMIT 1")
+
+
+def test_insert_and_load_uoa(tmp_db):
+    from catalysts import db as cdb
+    cdb.migrate(tmp_db)
+    sig = {
+        "ticker": "AAPL", "contract_ticker": "O:AAPL260425C00200000",
+        "contract_type": "call", "strike": 200.0, "expiration_date": "2026-04-25",
+        "volume": 5000, "open_interest": 800, "vol_oi_ratio": 6.25,
+        "ask": 1.50, "underlying_price": 195.0,
+        "flow_type": "normal",
+        "detected_at": "2026-04-16T14:00:00Z",
+    }
+    cdb.insert_uoa_signal(tmp_db, sig)
+    rows = cdb.load_uoa_signals(tmp_db, hours=24)
+    assert len(rows) == 1
+    assert rows[0]["vol_oi_ratio"] == 6.25
+
+
+def test_technicals_table_and_upsert(tmp_db):
+    from catalysts import db as cdb
+    cdb.migrate(tmp_db)
+    cdb.upsert_technical(tmp_db, "AAPL", 55.0, 1.2, 3.5, "Bullish", 2)
+    data = cdb.load_technicals(tmp_db)
+    assert data["AAPL"]["label"] == "Bullish"
+    assert data["AAPL"]["score"] == 2

@@ -17,6 +17,7 @@ from catalysts import db as cdb
 from catalysts import edgar, news, score, rerank, options
 from catalysts.dedup import filter_unseen, recently_alerted
 from catalysts.iv_rank import compute_atm_avg_iv, compute_iv_rank
+from catalysts.market_status import is_market_open
 from catalysts.options_score import rank_contracts
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
 from alerts import dispatcher
@@ -34,6 +35,10 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     if not os.environ.get("POLYGON_API_KEY"):
         return {}
 
+    if not is_market_open():
+        log.info("market closed, skipping options fetch")
+        return {}
+
     now_str = datetime.now(timezone.utc).isoformat(timespec="seconds")
     summaries: dict[str, str] = {}
 
@@ -42,6 +47,13 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     all_contracts = options.fetch_chains_batch(tickers, delay=0.1)
     if not all_contracts:
         return {}
+
+    from catalysts.uoa import detect_unusual
+    uoa_signals = detect_unusual(all_contracts)
+    for sig in uoa_signals:
+        cdb.insert_uoa_signal(conn, sig)
+    if uoa_signals:
+        log.info("detected %d UOA signals", len(uoa_signals))
 
     by_ticker: dict[str, list] = {}
     for c in all_contracts:
@@ -111,6 +123,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     raw += edgar.fetch(tickers, since_hours=2)
     raw += news.fetch_yfinance(tickers)
     raw += news.fetch_gnews_rss(tickers)
+    raw += news.fetch_polygon_news(tickers)
     print(f"[poller] fetched {len(raw)} raw items")
 
     fresh = filter_unseen(conn, raw)
@@ -137,8 +150,30 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if item.final_score >= 70 and item.llm_score is not None:
             alert_tickers.add(item.ticker)
 
+    # Backfill IV history for new tickers
+    if os.environ.get("POLYGON_API_KEY"):
+        from catalysts.iv_rank import backfill_batch
+        try:
+            n_filled = backfill_batch(tickers, conn, delay=0.1)
+            if n_filled:
+                print(f"[poller] backfilled IV history for {n_filled} tickers")
+        except Exception as exc:
+            print(f"[poller] IV backfill failed: {exc}")
+
     options_summaries = _fetch_options(conn, tickers)
     print(f"[poller] options summaries for {len(options_summaries)} tickers")
+
+    # Technical confluence scoring
+    if os.environ.get("POLYGON_API_KEY"):
+        from catalysts.technicals import fetch_technicals_batch
+        try:
+            tech_map = fetch_technicals_batch(tickers, prices=None, delay=0.05)
+            for t, sig in tech_map.items():
+                cdb.upsert_technical(conn, t, sig.rsi, sig.macd_histogram,
+                                     sig.price_vs_sma50, sig.label, sig.score)
+            print(f"[poller] technicals updated for {len(tech_map)} tickers")
+        except Exception as exc:
+            print(f"[poller] technicals failed: {exc}")
 
     alerts_sent = 0
     for item, cid in persisted:
@@ -151,7 +186,11 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if recently_alerted(conn, item.ticker, bucket, hours=6):
             continue
         summary = options_summaries.get(item.ticker)
-        ok, channels = dispatcher.send(item, options_summary=summary)
+        from catalysts.related import fetch_related
+        related = fetch_related(item.ticker, limit=5)
+        related = [r for r in related if r in set(tickers)]
+        related_str = f"Related: {', '.join(related)}" if related else None
+        ok, channels = dispatcher.send(item, options_summary=summary, related_tickers=related_str)
         sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         conn.execute(
             "INSERT INTO alert_log(catalyst_id,ticker,score_bucket,channels,sent_at,ok) "
