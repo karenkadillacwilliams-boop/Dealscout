@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS uoa_signals (
     vol_oi_ratio     REAL    NOT NULL,
     ask              REAL,
     underlying_price REAL,
+    flow_type        TEXT    NOT NULL DEFAULT 'normal',
     detected_at      TEXT    NOT NULL,
     UNIQUE(contract_ticker, detected_at)
 );
@@ -124,6 +125,11 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
 
 def migrate(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    # Phase 5 migration: add flow_type to uoa_signals if missing
+    try:
+        conn.execute("ALTER TABLE uoa_signals ADD COLUMN flow_type TEXT DEFAULT 'normal'")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     conn.commit()
 
 
@@ -281,9 +287,9 @@ def insert_uoa_signal(conn: sqlite3.Connection, row: dict) -> None:
     conn.execute(
         """INSERT OR IGNORE INTO uoa_signals
            (ticker, contract_ticker, contract_type, strike, expiration_date,
-            volume, open_interest, vol_oi_ratio, ask, underlying_price, detected_at)
+            volume, open_interest, vol_oi_ratio, ask, underlying_price, flow_type, detected_at)
            VALUES(:ticker,:contract_ticker,:contract_type,:strike,:expiration_date,
-                  :volume,:open_interest,:vol_oi_ratio,:ask,:underlying_price,:detected_at)""",
+                  :volume,:open_interest,:vol_oi_ratio,:ask,:underlying_price,:flow_type,:detected_at)""",
         row,
     )
     conn.commit()

@@ -111,6 +111,7 @@ def test_insert_and_load_uoa(tmp_db):
         "contract_type": "call", "strike": 200.0, "expiration_date": "2026-04-25",
         "volume": 5000, "open_interest": 800, "vol_oi_ratio": 6.25,
         "ask": 1.50, "underlying_price": 195.0,
+        "flow_type": "normal",
         "detected_at": "2026-04-16T14:00:00Z",
     }
     cdb.insert_uoa_signal(tmp_db, sig)

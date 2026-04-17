@@ -520,19 +520,31 @@ elif page.startswith("Options Pulse"):
         if not uoa_rows:
             st.info("No unusual activity detected in the last 24 hours.")
         else:
-            uoa_df = pd.DataFrame(uoa_rows)[[
-                "ticker", "contract_type", "strike", "expiration_date",
-                "volume", "open_interest", "vol_oi_ratio", "ask", "detected_at",
-            ]].rename(columns={
+            _flow_cols = ["ticker", "contract_type", "strike", "expiration_date",
+                          "volume", "open_interest", "vol_oi_ratio", "ask", "flow_type", "detected_at"]
+            # flow_type may be missing from older DB rows — fill with 'normal'
+            uoa_df = pd.DataFrame(uoa_rows)
+            if "flow_type" not in uoa_df.columns:
+                uoa_df["flow_type"] = "normal"
+            uoa_df = uoa_df[_flow_cols].rename(columns={
                 "ticker": "Ticker", "contract_type": "Type", "strike": "Strike",
                 "expiration_date": "Exp", "volume": "Volume", "open_interest": "OI",
-                "vol_oi_ratio": "Vol/OI", "ask": "Ask", "detected_at": "Detected",
+                "vol_oi_ratio": "Vol/OI", "ask": "Ask", "flow_type": "Flow",
+                "detected_at": "Detected",
             })
+
+            def _color_flow(val):
+                if val == "sweep":
+                    return "color: red; font-weight: bold"
+                if val == "block":
+                    return "color: orange"
+                return ""
+
             st.dataframe(
                 uoa_df.style.format({
                     "Strike": "${:,.2f}", "Ask": "${:,.2f}",
                     "Vol/OI": "{:.1f}x",
-                }),
+                }).map(_color_flow, subset=["Flow"]),
                 width="stretch", hide_index=True,
             )
 
