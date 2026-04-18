@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 
-import requests
-
+from catalysts import polygon_client
 from catalysts.options import OptionContract
 
 log = logging.getLogger("uoa")
@@ -16,19 +14,13 @@ VOL_OI_RATIO = 3.0
 
 
 def _fetch_recent_trades(contract_ticker: str, limit: int = 50) -> list[dict]:
-    key = os.environ.get("POLYGON_API_KEY", "")
-    if not key:
+    body = polygon_client.get(
+        f"/v3/trades/{contract_ticker}",
+        params={"limit": limit, "sort": "timestamp", "order": "desc"},
+    )
+    if body is None:
         return []
-    try:
-        r = requests.get(
-            f"https://api.polygon.io/v3/trades/{contract_ticker}",
-            params={"limit": limit, "sort": "timestamp", "order": "desc", "apiKey": key},
-            timeout=10,
-        )
-        r.raise_for_status()
-        return r.json().get("results", [])
-    except Exception:
-        return []
+    return body.get("results", [])
 
 
 def classify_flow(trades: list[dict], ask_price: float) -> str:

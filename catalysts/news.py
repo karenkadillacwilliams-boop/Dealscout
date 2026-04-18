@@ -76,26 +76,19 @@ def fetch_yfinance(tickers: Iterable[str]) -> list[RawCatalyst]:
 
 def fetch_polygon_news(tickers: list[str], limit_per_ticker: int = 10) -> list[RawCatalyst]:
     """Fetch news from Polygon.io REST API for the given tickers."""
-    import os
-
-    key = os.environ.get("POLYGON_API_KEY", "")
-    if not key:
-        return []
+    from catalysts import polygon_client
 
     seen_ids: set[str] = set()
     results: list[RawCatalyst] = []
 
     for ticker in tickers:
-        try:
-            r = requests.get(
-                "https://api.polygon.io/v2/reference/news",
-                params={"ticker": ticker, "limit": limit_per_ticker, "apiKey": key},
-                timeout=15,
-            )
-            r.raise_for_status()
-            articles = r.json().get("results", [])
-        except Exception:
+        body = polygon_client.get(
+            "/v2/reference/news",
+            params={"ticker": ticker, "limit": limit_per_ticker},
+        )
+        if body is None:
             continue
+        articles = body.get("results", [])
 
         for art in articles:
             art_id = art.get("id", "")

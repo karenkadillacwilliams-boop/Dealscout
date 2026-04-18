@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import logging
-import os
-import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional
 
-import requests
+from catalysts import polygon_client
 
 log = logging.getLogger("options")
 
@@ -34,13 +32,6 @@ class OptionContract:
     underlying_price: float
 
 
-_BASE = "https://api.polygon.io/v3/snapshot/options"
-
-
-def _api_key() -> str:
-    return os.environ.get("POLYGON_API_KEY", "")
-
-
 def fetch_chain(
     ticker: str,
     *,
@@ -49,44 +40,19 @@ def fetch_chain(
     max_dte: int = 28,
     ref_date: Optional[date] = None,
 ) -> list[OptionContract]:
-    key = _api_key()
-    if not key:
-        log.warning("POLYGON_API_KEY not set, skipping options fetch")
-        return []
-
     today = ref_date or date.today()
     exp_gte = (today + timedelta(days=min_dte)).isoformat()
     exp_lte = (today + timedelta(days=max_dte)).isoformat()
 
-    params: dict = {
+    params = {
         "expiration_date.gte": exp_gte,
         "expiration_date.lte": exp_lte,
         "limit": 250,
-        "apiKey": key,
     }
 
     results: list[dict] = []
-    url: Optional[str] = f"{_BASE}/{ticker}"
-
-    try:
-        while url:
-            resp = requests.get(url, params=params, timeout=15)
-            resp.raise_for_status()
-            body = resp.json()
-            results.extend(body.get("results", []))
-            next_url = body.get("next_url")
-            if next_url:
-                # subsequent pages: URL already contains query params from Polygon
-                url = next_url
-                params = {"apiKey": key}
-            else:
-                url = None
-    except requests.HTTPError as exc:
-        log.warning("polygon fetch %s failed: %s", ticker, exc)
-        return []
-    except requests.RequestException as exc:
-        log.warning("polygon fetch %s failed: %s", ticker, exc)
-        return []
+    for page in polygon_client.paginate(f"/v3/snapshot/options/{ticker}", params=params):
+        results.extend(page.get("results", []))
 
     contracts: list[OptionContract] = []
     for r in results:
@@ -143,10 +109,9 @@ def fetch_chains_batch(
     max_ask: float = 2.00,
     min_dte: int = 7,
     max_dte: int = 28,
-    delay: float = 0.1,
 ) -> list[OptionContract]:
+    """Fetch chains for many tickers. Rate-limiting handled by polygon_client."""
     all_contracts: list[OptionContract] = []
     for t in tickers:
         all_contracts.extend(fetch_chain(t, max_ask=max_ask, min_dte=min_dte, max_dte=max_dte))
-        time.sleep(delay)
     return all_contracts

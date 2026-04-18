@@ -1,5 +1,6 @@
 from unittest.mock import patch, MagicMock
 
+from catalysts import polygon_client as pc
 from catalysts.iv_rank import compute_iv_rank, compute_atm_avg_iv
 from catalysts.options import OptionContract
 
@@ -65,6 +66,7 @@ def _mock_aggs_response(num_bars=50):
         })
     resp = MagicMock()
     resp.status_code = 200
+    resp.headers = {}
     resp.json.return_value = {"results": bars}
     resp.raise_for_status = MagicMock()
     return resp
@@ -73,9 +75,10 @@ def _mock_aggs_response(num_bars=50):
 def test_backfill_realized_vol(tmp_db, monkeypatch):
     from catalysts import db as cdb
     from catalysts.iv_rank import backfill_realized_vol
+    pc.reset_bucket_for_tests()
     cdb.migrate(tmp_db)
 
-    with patch("catalysts.iv_rank.requests.get", return_value=_mock_aggs_response(50)):
+    with patch.object(pc.requests, "get", return_value=_mock_aggs_response(50)):
         result = backfill_realized_vol("AAPL", tmp_db)
 
     assert result is True
@@ -86,6 +89,7 @@ def test_backfill_realized_vol(tmp_db, monkeypatch):
 def test_backfill_skips_if_history_exists(tmp_db, monkeypatch):
     from catalysts import db as cdb
     from catalysts.iv_rank import backfill_realized_vol
+    pc.reset_bucket_for_tests()
     cdb.migrate(tmp_db)
 
     # Pre-populate with 5 entries
@@ -99,6 +103,7 @@ def test_backfill_skips_if_history_exists(tmp_db, monkeypatch):
 def test_backfill_no_key(tmp_db, monkeypatch):
     from catalysts import db as cdb
     from catalysts.iv_rank import backfill_realized_vol
+    pc.reset_bucket_for_tests()
     cdb.migrate(tmp_db)
     monkeypatch.delenv("POLYGON_API_KEY", raising=False)
 

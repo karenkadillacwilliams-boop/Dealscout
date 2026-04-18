@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import math
-import os
 from datetime import date, timedelta
 from typing import Optional, Sequence
 
-import requests
-
+from catalysts import polygon_client
 from catalysts.options import OptionContract
 
 _MIN_HISTORY = 5
@@ -58,23 +56,16 @@ def backfill_realized_vol(
     if existing >= 5:
         return False
 
-    key = os.environ.get("POLYGON_API_KEY", "")
-    if not key:
-        return False
-
     end = date.today()
     start = end - timedelta(days=days + 30)  # extra buffer for weekends/holidays
 
-    try:
-        r = requests.get(
-            f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{start.isoformat()}/{end.isoformat()}",
-            params={"adjusted": "true", "sort": "asc", "apiKey": key},
-            timeout=15,
-        )
-        r.raise_for_status()
-        bars = r.json().get("results", [])
-    except Exception:
+    body = polygon_client.get(
+        f"/v2/aggs/ticker/{ticker}/range/1/day/{start.isoformat()}/{end.isoformat()}",
+        params={"adjusted": "true", "sort": "asc"},
+    )
+    if body is None:
         return False
+    bars = body.get("results", [])
 
     if len(bars) < 22:
         return False
@@ -96,13 +87,10 @@ def backfill_realized_vol(
     return True
 
 
-def backfill_batch(tickers: list[str], conn, delay: float = 0.1) -> int:
-    """Backfill realized vol for all tickers that need it. Returns count of tickers backfilled."""
-    import time
-
+def backfill_batch(tickers: list[str], conn) -> int:
+    """Backfill realized vol for all tickers that need it. Rate-limiting handled by polygon_client."""
     count = 0
     for t in tickers:
         if backfill_realized_vol(t, conn):
             count += 1
-            time.sleep(delay)
     return count

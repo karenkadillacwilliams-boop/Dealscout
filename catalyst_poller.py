@@ -44,7 +44,7 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
 
     cdb.clear_stale_options(conn)
 
-    all_contracts = options.fetch_chains_batch(tickers, delay=0.1)
+    all_contracts = options.fetch_chains_batch(tickers)
     if not all_contracts:
         return {}
 
@@ -154,7 +154,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     if os.environ.get("POLYGON_API_KEY"):
         from catalysts.iv_rank import backfill_batch
         try:
-            n_filled = backfill_batch(tickers, conn, delay=0.1)
+            n_filled = backfill_batch(tickers, conn)
             if n_filled:
                 print(f"[poller] backfilled IV history for {n_filled} tickers")
         except Exception as exc:
@@ -167,7 +167,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     if os.environ.get("POLYGON_API_KEY"):
         from catalysts.technicals import fetch_technicals_batch
         try:
-            tech_map = fetch_technicals_batch(tickers, prices=None, delay=0.05)
+            tech_map = fetch_technicals_batch(tickers, prices=None)
             for t, sig in tech_map.items():
                 cdb.upsert_technical(conn, t, sig.rsi, sig.macd_histogram,
                                      sig.price_vs_sma50, sig.label, sig.score)

@@ -104,15 +104,17 @@ def test_uoa_signals_table_exists(tmp_db):
 
 
 def test_insert_and_load_uoa(tmp_db):
+    from datetime import datetime, timezone
     from catalysts import db as cdb
     cdb.migrate(tmp_db)
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     sig = {
         "ticker": "AAPL", "contract_ticker": "O:AAPL260425C00200000",
         "contract_type": "call", "strike": 200.0, "expiration_date": "2026-04-25",
         "volume": 5000, "open_interest": 800, "vol_oi_ratio": 6.25,
         "ask": 1.50, "underlying_price": 195.0,
         "flow_type": "normal",
-        "detected_at": "2026-04-16T14:00:00Z",
+        "detected_at": now_iso,
     }
     cdb.insert_uoa_signal(tmp_db, sig)
     rows = cdb.load_uoa_signals(tmp_db, hours=24)

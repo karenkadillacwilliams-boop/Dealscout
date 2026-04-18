@@ -32,11 +32,13 @@ def test_yfinance_news_handles_empty(monkeypatch):
 
 
 def test_polygon_news_parses_articles(monkeypatch):
-    import requests as req_mod
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, patch
+    from catalysts import polygon_client as pc
 
+    pc.reset_bucket_for_tests()
     mock_resp = MagicMock()
     mock_resp.status_code = 200
+    mock_resp.headers = {}
     mock_resp.json.return_value = {
         "results": [
             {
@@ -56,10 +58,10 @@ def test_polygon_news_parses_articles(monkeypatch):
     }
     mock_resp.raise_for_status = MagicMock()
     monkeypatch.setenv("POLYGON_API_KEY", "test-key")
-    monkeypatch.setattr(req_mod, "get", lambda *a, **kw: mock_resp)
 
     from catalysts.news import fetch_polygon_news
-    items = fetch_polygon_news(["AAPL"])
+    with patch.object(pc.requests, "get", return_value=mock_resp):
+        items = fetch_polygon_news(["AAPL"])
     assert len(items) == 1
     assert items[0].source == "polygon-news"
     assert items[0].source_id == "polygon:poly1"
@@ -67,11 +69,13 @@ def test_polygon_news_parses_articles(monkeypatch):
 
 
 def test_polygon_news_deduplicates(monkeypatch):
-    import requests as req_mod
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, patch
+    from catalysts import polygon_client as pc
 
+    pc.reset_bucket_for_tests()
     mock_resp = MagicMock()
     mock_resp.status_code = 200
+    mock_resp.headers = {}
     mock_resp.json.return_value = {
         "results": [
             {
@@ -84,15 +88,17 @@ def test_polygon_news_deduplicates(monkeypatch):
     }
     mock_resp.raise_for_status = MagicMock()
     monkeypatch.setenv("POLYGON_API_KEY", "test-key")
-    monkeypatch.setattr(req_mod, "get", lambda *a, **kw: mock_resp)
 
     from catalysts.news import fetch_polygon_news
-    # Same article appears for both tickers — should deduplicate by ID
-    items = fetch_polygon_news(["AAPL", "NVDA"])
+    with patch.object(pc.requests, "get", return_value=mock_resp):
+        # Same article appears for both tickers — should deduplicate by ID
+        items = fetch_polygon_news(["AAPL", "NVDA"])
     assert len(items) == 1
 
 
 def test_polygon_news_no_key_returns_empty(monkeypatch):
+    from catalysts import polygon_client as pc
+    pc.reset_bucket_for_tests()
     monkeypatch.delenv("POLYGON_API_KEY", raising=False)
     from catalysts.news import fetch_polygon_news
     items = fetch_polygon_news(["AAPL"])
