@@ -393,12 +393,17 @@ elif page.startswith("Catalysts"):
     if ticker_filter:
         records = [r for r in records if ticker_filter in r["ticker"]]
 
+    related_map = cdb.load_related_tickers_all(_conn)
+    for r in records:
+        kin = related_map.get(r["ticker"], [])
+        r["related"] = ", ".join(kin[:5]) if kin else "—"
+
     if not records:
         st.info("No catalysts match the current filters. Run the poller or lower the min score.")
     else:
         import pandas as pd
         df = pd.DataFrame(records)[[
-            "final_score", "ticker", "headline", "source", "form_type",
+            "final_score", "ticker", "headline", "related", "source", "form_type",
             "published_at", "kw_score", "llm_score"
         ]]
         st.dataframe(

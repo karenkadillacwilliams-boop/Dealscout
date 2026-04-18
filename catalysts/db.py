@@ -112,6 +112,13 @@ CREATE TABLE IF NOT EXISTS technicals (
     score           INTEGER NOT NULL,
     updated_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS related_tickers (
+    ticker         TEXT NOT NULL,
+    related        TEXT NOT NULL,  -- JSON array
+    fetched_at     TEXT NOT NULL,
+    PRIMARY KEY (ticker)
+);
 """
 
 
@@ -336,3 +343,44 @@ def upsert_technical(
 def load_technicals(conn: sqlite3.Connection) -> dict[str, dict]:
     rows = conn.execute("SELECT * FROM technicals").fetchall()
     return {r["ticker"]: dict(r) for r in rows}
+
+
+def upsert_related_tickers(
+    conn: sqlite3.Connection, ticker: str, related: list[str]
+) -> None:
+    conn.execute(
+        "INSERT INTO related_tickers(ticker, related, fetched_at) VALUES(?,?,?) "
+        "ON CONFLICT(ticker) DO UPDATE SET "
+        "related=excluded.related, fetched_at=excluded.fetched_at",
+        (ticker.upper(), json.dumps(related), _now()),
+    )
+    conn.commit()
+
+
+def load_related_tickers(
+    conn: sqlite3.Connection, ticker: str, ttl_hours: int = 24
+) -> list[str] | None:
+    """Return cached related tickers if fresh (within ttl_hours), else None."""
+    row = conn.execute(
+        "SELECT related FROM related_tickers "
+        "WHERE ticker=? AND datetime(fetched_at) >= datetime('now', ?)",
+        (ticker.upper(), f"-{ttl_hours} hours"),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def load_related_tickers_all(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Return {ticker: [related...]} for all cached rows (no TTL filter)."""
+    rows = conn.execute("SELECT ticker, related FROM related_tickers").fetchall()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        try:
+            out[r["ticker"]] = json.loads(r["related"])
+        except (TypeError, ValueError):
+            continue
+    return out

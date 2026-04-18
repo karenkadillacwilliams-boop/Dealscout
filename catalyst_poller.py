@@ -19,6 +19,7 @@ from catalysts.dedup import filter_unseen, recently_alerted
 from catalysts.iv_rank import compute_atm_avg_iv, compute_iv_rank
 from catalysts.market_status import is_market_open
 from catalysts.options_score import rank_contracts
+from catalysts.related import fetch_related
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
 from alerts import dispatcher
 
@@ -186,8 +187,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         if recently_alerted(conn, item.ticker, bucket, hours=6):
             continue
         summary = options_summaries.get(item.ticker)
-        from catalysts.related import fetch_related
-        related = fetch_related(item.ticker, limit=5)
+        related = fetch_related(item.ticker, limit=5, conn=conn)
         related = [r for r in related if r in set(tickers)]
         related_str = f"Related: {', '.join(related)}" if related else None
         ok, channels = dispatcher.send(item, options_summary=summary, related_tickers=related_str)
