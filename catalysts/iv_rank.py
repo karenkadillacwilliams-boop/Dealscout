@@ -71,16 +71,19 @@ def backfill_realized_vol(
         return False
 
     closes = [b["c"] for b in bars]
+    # log_returns[k] = log(closes[k+1] / closes[k]), so a 20-return window
+    # ending at log_returns[i-1] covers the returns between bars[i-20] and bars[i].
+    # The last bar observed in that window is bars[i] — its timestamp is what we store.
     log_returns = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
 
     window = 20
-    for i in range(window, len(log_returns)):
+    for i in range(window, len(log_returns) + 1):
         segment = log_returns[i - window : i]
         mean = sum(segment) / window
         variance = sum((x - mean) ** 2 for x in segment) / (window - 1)
         realized_vol = math.sqrt(variance) * math.sqrt(252)
 
-        bar_ts = bars[i + 1]["t"]  # +1 because log_returns is offset by 1
+        bar_ts = bars[i]["t"]
         bar_date = date.fromtimestamp(bar_ts / 1000).isoformat()
         upsert_iv_history(conn, ticker, bar_date, round(realized_vol, 6))
 

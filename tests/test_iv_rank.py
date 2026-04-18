@@ -109,3 +109,57 @@ def test_backfill_no_key(tmp_db, monkeypatch):
 
     result = backfill_realized_vol("AAPL", tmp_db)
     assert result is False
+
+
+def _known_bars(count=30, start_date="2026-03-01"):
+    """Generate `count` bars with distinct, deterministic daily timestamps
+    starting from `start_date`. Returns (bars, dates_iso)."""
+    from datetime import date as _date, timedelta as _td, datetime as _dt, timezone as _tz
+
+    d0 = _date.fromisoformat(start_date)
+    bars = []
+    dates = []
+    for i in range(count):
+        d = d0 + _td(days=i)
+        dt = _dt(d.year, d.month, d.day, 21, 0, 0, tzinfo=_tz.utc)  # 21:00 UTC = NY close
+        ts_ms = int(dt.timestamp() * 1000)
+        price = 100.0 + i * 0.5 + (i % 3 - 1) * 2.0
+        bars.append({"t": ts_ms, "o": price - 0.5, "h": price + 1.0,
+                     "l": price - 1.0, "c": price, "v": 1_000_000})
+        dates.append(d.isoformat())
+    return bars, dates
+
+
+def test_backfill_stores_dates_at_window_close_not_day_after(tmp_db, monkeypatch):
+    """Regression: previously wrote bars[i+1]['t'] — dates were one trading day ahead.
+
+    With a 20-day window and 30 bars, the windows close at bars[20]..bars[29].
+    The stored dates must match those closing bars exactly — never bars[21]..bars[30].
+    """
+    from catalysts import db as cdb
+    from catalysts.iv_rank import backfill_realized_vol
+    pc.reset_bucket_for_tests()
+    cdb.migrate(tmp_db)
+
+    bars, iso_dates = _known_bars(count=30)
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.headers = {}
+    resp.json.return_value = {"results": bars}
+    resp.raise_for_status = MagicMock()
+
+    with patch.object(pc.requests, "get", return_value=resp):
+        assert backfill_realized_vol("AAPL", tmp_db) is True
+
+    stored = [r[0] for r in tmp_db.execute(
+        "SELECT date FROM iv_history WHERE ticker='AAPL' ORDER BY date"
+    ).fetchall()]
+
+    # Windows close at bars[20]..bars[29] — that's 10 entries.
+    expected = iso_dates[20:30]
+    assert stored == expected, (
+        f"date alignment broken: stored {stored} vs expected {expected}"
+    )
+    # And explicitly: the first date must be bars[20]'s date, not bars[21]'s.
+    assert stored[0] == iso_dates[20]
+    assert stored[0] != iso_dates[21]
