@@ -12,17 +12,47 @@ from catalysts import db as cdb
 from app_pages.shared import get_conn
 
 
+def _staleness_banner(conn) -> None:
+    """Show last-poll time + most-recent-catalyst so users understand empty states."""
+    last_poll = cdb.last_poll_time(conn)
+    newest = conn.execute(
+        "SELECT MAX(published_at) AS p FROM catalysts"
+    ).fetchone()["p"]
+    total = conn.execute("SELECT COUNT(*) FROM catalysts").fetchone()[0]
+
+    cols = st.columns(3)
+    cols[0].metric("Total catalysts", total)
+    cols[1].metric("Last poll", (last_poll or "—")[:16].replace("T", " "))
+    cols[2].metric("Newest catalyst", (newest or "—")[:16].replace("T", " "))
+
+    if last_poll:
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromisoformat(last_poll.replace("Z", "+00:00"))
+            hours_ago = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+            if hours_ago > 6:
+                st.warning(
+                    f"Poller hasn't run in {int(hours_ago)}h. "
+                    "Run `python catalyst_poller.py` to fetch fresh filings and news."
+                )
+        except ValueError:
+            pass
+
+
 def render() -> None:
     conn = get_conn()
 
     st.title("Catalysts")
     st.caption("Ingested filings and news, scored for M&A / partnership / product signal.")
+    _staleness_banner(conn)
 
     c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
     with c1:
-        min_score = st.slider("Min score", 0, 100, 70, 5)
+        min_score = st.slider("Min score", 0, 100, 30, 5,
+                              help="70 is LLM-reranked high-conviction. "
+                                   "30 includes keyword-scored items.")
     with c2:
-        lookback = st.selectbox("Lookback", ["6h", "24h", "7d", "30d"], index=1)
+        lookback = st.selectbox("Lookback", ["6h", "24h", "7d", "30d"], index=3)
     with c3:
         tag_filter = st.selectbox(
             "Tag",
@@ -58,7 +88,22 @@ def render() -> None:
         r["related"] = ", ".join(kin[:5]) if kin else "—"
 
     if not records:
-        st.info("No catalysts match the current filters. Run the poller or lower the min score.")
+        total_in_window = conn.execute(
+            "SELECT COUNT(*) FROM catalysts "
+            "WHERE datetime(published_at) >= datetime('now', ?)",
+            (f"-{hours} hours",),
+        ).fetchone()[0]
+        if total_in_window == 0:
+            st.info(
+                f"No catalysts in the last {lookback}. Widen the lookback window "
+                "above, or run the poller."
+            )
+        else:
+            st.info(
+                f"No catalysts in the last {lookback} at score ≥ {min_score} "
+                f"(there are {total_in_window} below that threshold). "
+                "Lower the Min score slider above, or change the Tag filter."
+            )
         return
 
     df = pd.DataFrame(records)[[

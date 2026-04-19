@@ -27,6 +27,21 @@ def _flow_color(val):
     return ""
 
 
+def _staleness_banner(conn) -> None:
+    newest = conn.execute(
+        "SELECT MAX(fetched_at) AS f FROM options_snapshot"
+    ).fetchone()["f"]
+    total = conn.execute("SELECT COUNT(*) FROM options_snapshot").fetchone()[0]
+    uoa_newest = conn.execute(
+        "SELECT MAX(detected_at) AS d FROM uoa_signals"
+    ).fetchone()["d"]
+
+    cols = st.columns(3)
+    cols[0].metric("Contracts tracked", total)
+    cols[1].metric("Last options fetch", (newest or "—")[:16].replace("T", " "))
+    cols[2].metric("Last UOA signal", (uoa_newest or "—")[:16].replace("T", " "))
+
+
 def render() -> None:
     conn = get_conn()
 
@@ -35,10 +50,26 @@ def render() -> None:
         "Cheap convexity screener — calls & puts under $2, 7-28 DTE, "
         "ranked by catalyst-weighted leverage + IV rank."
     )
+    _staleness_banner(conn)
 
     opts_rows = cdb.load_all_options(conn)
     if not opts_rows:
-        st.info("No qualifying options found. Run the poller with POLYGON_API_KEY set.")
+        import os
+        from catalysts.market_status import is_market_open
+
+        reasons = []
+        if not os.environ.get("POLYGON_API_KEY"):
+            reasons.append("POLYGON_API_KEY is not set — options require a Polygon key.")
+        elif not is_market_open():
+            reasons.append(
+                "The US equity market is currently closed. Options are only "
+                "fetched during market hours (including extended-hours trading)."
+            )
+        else:
+            reasons.append(
+                "The poller hasn't populated options yet. Run `python catalyst_poller.py`."
+            )
+        st.info(" ".join(reasons))
     else:
         opts_df = pd.DataFrame(opts_rows)
 
