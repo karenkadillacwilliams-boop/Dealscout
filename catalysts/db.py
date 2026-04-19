@@ -123,7 +123,10 @@ CREATE TABLE IF NOT EXISTS related_tickers (
 
 
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
+    # check_same_thread=False lets Streamlit reuse a cached connection across
+    # its per-rerun worker threads. Safe: SQLite (threadsafe=1 build) serialises
+    # statements with its own mutex, and WAL permits concurrent readers.
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")

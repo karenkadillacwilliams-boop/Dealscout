@@ -1,4 +1,36 @@
+import threading
+from pathlib import Path
+
 from catalysts import db as cdb
+
+
+def test_connect_allows_cross_thread_use(tmp_path: Path):
+    """Regression: Streamlit caches the connection and reuses it across
+    its per-rerun worker threads. Opening a conn in one thread and
+    executing on it from another must not raise ProgrammingError.
+    """
+    conn = cdb.connect(tmp_path / "d.db")
+    try:
+        cdb.migrate(conn)
+        cdb.upsert_universe(conn, "NVDA")
+
+        err: list[Exception] = []
+        result: list[list[str]] = []
+
+        def _worker():
+            try:
+                result.append(cdb.load_active_universe(conn))
+            except Exception as exc:
+                err.append(exc)
+
+        t = threading.Thread(target=_worker)
+        t.start()
+        t.join(timeout=5)
+        assert not err, f"cross-thread use raised: {err[0]!r}"
+        assert result and result[0] == ["NVDA"]
+    finally:
+        conn.close()
+
 
 def test_migrate_creates_all_tables(tmp_db):
     cdb.migrate(tmp_db)
