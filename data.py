@@ -1,6 +1,7 @@
 """Price fetching, period returns, momentum grading, and Power Gauge wiring."""
 from __future__ import annotations
 
+import logging
 import math
 
 import pandas as pd
@@ -8,6 +9,12 @@ import streamlit as st
 import yfinance as yf
 
 from power_gauge import calculate_power_gauge
+
+# yfinance logs a WARNING for every delisted/mis-typed ticker on every fetch.
+# Those messages are cosmetic — the fetch already handles missing columns
+# correctly — so we silence them to keep the server log readable. Errors
+# (not warnings) still propagate.
+logging.getLogger("yfinance").setLevel(logging.ERROR)
 
 
 @st.cache_data(ttl=900, show_spinner="Fetching prices from Yahoo Finance...")

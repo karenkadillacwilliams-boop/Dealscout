@@ -1,10 +1,20 @@
+from datetime import date
 from unittest.mock import patch, MagicMock
 
 from catalyst_poller import run_once
-from catalysts import db as cdb, edgar, news, rerank, polygon_client as pc
+from catalysts import db as cdb, edgar, market_status, news, options, rerank, polygon_client as pc
 from catalysts.types import RawCatalyst, RerankedItem
 from alerts import dispatcher
 from tests.fixtures.polygon_snapshot import AAPL_SNAPSHOT
+
+
+class _FixedDate(date):
+    """date subclass whose today() returns a value inside the fixture's DTE window."""
+    @classmethod
+    def today(cls):
+        # AAPL_SNAPSHOT expirations are 2026-04-25; keep ourselves 10 days prior
+        # so the 7-28 DTE filter in options.fetch_chain includes them.
+        return date(2026, 4, 15)
 
 
 def _stub_fetchers(monkeypatch, items):
@@ -32,6 +42,10 @@ def _mock_polygon_response(snapshot_data, status=200):
 
 def test_poller_fetches_options_and_enriches_alert(monkeypatch, tmp_path):
     pc.reset_bucket_for_tests()
+    market_status._cache.clear()
+    import catalyst_poller
+    monkeypatch.setattr(catalyst_poller, "is_market_open", lambda: True)
+    monkeypatch.setattr(options, "date", _FixedDate)
     monkeypatch.setattr(cdb, "DB_PATH", tmp_path / "d.db")
     conn = cdb.connect(tmp_path / "d.db")
     cdb.migrate(conn)
@@ -64,6 +78,10 @@ def test_poller_fetches_options_and_enriches_alert(monkeypatch, tmp_path):
 
 def test_poller_survives_polygon_failure(monkeypatch, tmp_path):
     pc.reset_bucket_for_tests()
+    market_status._cache.clear()
+    import catalyst_poller
+    monkeypatch.setattr(catalyst_poller, "is_market_open", lambda: True)
+    monkeypatch.setattr(options, "date", _FixedDate)
     monkeypatch.setattr(pc.time, "sleep", lambda _: None)
     monkeypatch.setattr(cdb, "DB_PATH", tmp_path / "d.db")
     conn = cdb.connect(tmp_path / "d.db")
