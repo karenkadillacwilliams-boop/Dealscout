@@ -119,6 +119,81 @@ CREATE TABLE IF NOT EXISTS related_tickers (
     fetched_at     TEXT NOT NULL,
     PRIMARY KEY (ticker)
 );
+
+CREATE TABLE IF NOT EXISTS accounts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    NOT NULL UNIQUE,
+  type          TEXT    NOT NULL,
+  broker        TEXT    NOT NULL,
+  opened_date   TEXT    NOT NULL,
+  initial_cash  REAL    NOT NULL DEFAULT 0,
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT    NOT NULL,
+  event_daily_pct  REAL,
+  event_5day_pct   REAL
+);
+
+CREATE TABLE IF NOT EXISTS trades (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id      INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  ticker          TEXT    NOT NULL,
+  side            TEXT    NOT NULL CHECK (side IN ('BUY','SELL')),
+  qty             REAL    NOT NULL CHECK (qty > 0),
+  price           REAL    NOT NULL CHECK (price >= 0),
+  trade_date      TEXT    NOT NULL,
+  notes           TEXT,
+  import_batch_id INTEGER,
+  dedup_key       TEXT    NOT NULL UNIQUE,
+  created_at      TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trades_account_date ON trades(account_id, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_ticker       ON trades(ticker);
+
+CREATE TABLE IF NOT EXISTS events (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id     INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  ticker         TEXT    NOT NULL,
+  event_date     TEXT    NOT NULL,
+  move_pct       REAL    NOT NULL,
+  move_window    TEXT    NOT NULL,
+  position_qty   REAL    NOT NULL,
+  value_before   REAL    NOT NULL,
+  value_after    REAL    NOT NULL,
+  pnl_dollars    REAL    NOT NULL,
+  catalyst_id    INTEGER REFERENCES catalysts(id) ON DELETE SET NULL,
+  catalyst_type  TEXT,
+  status         TEXT    NOT NULL DEFAULT 'pending',
+  notes          TEXT,
+  detected_at    TEXT    NOT NULL,
+  confirmed_at   TEXT,
+  UNIQUE(account_id, ticker, event_date, move_window)
+);
+CREATE INDEX IF NOT EXISTS idx_events_status   ON events(status, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_catalyst ON events(catalyst_id);
+
+CREATE TABLE IF NOT EXISTS import_profiles (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL UNIQUE,
+  broker      TEXT    NOT NULL,
+  column_map  TEXT    NOT NULL,
+  value_map   TEXT    NOT NULL DEFAULT '{}',
+  row_filter  TEXT    NOT NULL DEFAULT '{}',
+  builtin     INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS import_batches (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  profile_id   INTEGER REFERENCES import_profiles(id),
+  filename     TEXT    NOT NULL,
+  row_count    INTEGER NOT NULL,
+  inserted     INTEGER NOT NULL,
+  duplicates   INTEGER NOT NULL,
+  rejected     INTEGER NOT NULL DEFAULT 0,
+  imported_at  TEXT    NOT NULL,
+  notes        TEXT
+);
 """
 
 
@@ -387,3 +462,99 @@ def load_related_tickers_all(conn: sqlite3.Connection) -> dict[str, list[str]]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def create_account(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    type: str,
+    broker: str,
+    opened_date: str,
+    initial_cash: float = 0.0,
+    event_daily_pct: float | None = None,
+    event_5day_pct: float | None = None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO accounts(name,type,broker,opened_date,initial_cash,"
+        "event_daily_pct,event_5day_pct,active,created_at) "
+        "VALUES(?,?,?,?,?,?,?,1,?)",
+        (name, type, broker, opened_date, initial_cash,
+         event_daily_pct, event_5day_pct, _now()),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def load_accounts(conn: sqlite3.Connection, active_only: bool = True) -> list[dict]:
+    q = "SELECT * FROM accounts"
+    if active_only:
+        q += " WHERE active=1"
+    q += " ORDER BY name"
+    return [dict(r) for r in conn.execute(q).fetchall()]
+
+
+def load_account(conn: sqlite3.Connection, account_id: int) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM accounts WHERE id=?", (account_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def deactivate_account(conn: sqlite3.Connection, account_id: int) -> None:
+    conn.execute("UPDATE accounts SET active=0 WHERE id=?", (account_id,))
+    conn.commit()
+
+
+def update_account(
+    conn: sqlite3.Connection,
+    account_id: int,
+    **fields,
+) -> None:
+    """Update any subset of: name, type, broker, opened_date, initial_cash,
+    event_daily_pct, event_5day_pct, active.
+
+    Each column is updated via its own fully-literal parameterised statement
+    so no user-supplied text ever touches the SQL template.
+    """
+    if "name" in fields:
+        conn.execute(
+            "UPDATE accounts SET name=? WHERE id=?",
+            (fields["name"], account_id),
+        )
+    if "type" in fields:
+        conn.execute(
+            "UPDATE accounts SET type=? WHERE id=?",
+            (fields["type"], account_id),
+        )
+    if "broker" in fields:
+        conn.execute(
+            "UPDATE accounts SET broker=? WHERE id=?",
+            (fields["broker"], account_id),
+        )
+    if "opened_date" in fields:
+        conn.execute(
+            "UPDATE accounts SET opened_date=? WHERE id=?",
+            (fields["opened_date"], account_id),
+        )
+    if "initial_cash" in fields:
+        conn.execute(
+            "UPDATE accounts SET initial_cash=? WHERE id=?",
+            (fields["initial_cash"], account_id),
+        )
+    if "event_daily_pct" in fields:
+        conn.execute(
+            "UPDATE accounts SET event_daily_pct=? WHERE id=?",
+            (fields["event_daily_pct"], account_id),
+        )
+    if "event_5day_pct" in fields:
+        conn.execute(
+            "UPDATE accounts SET event_5day_pct=? WHERE id=?",
+            (fields["event_5day_pct"], account_id),
+        )
+    if "active" in fields:
+        conn.execute(
+            "UPDATE accounts SET active=? WHERE id=?",
+            (fields["active"], account_id),
+        )
+    conn.commit()
