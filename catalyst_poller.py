@@ -176,6 +176,16 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         except Exception as exc:
             print(f"[poller] technicals failed: {exc}")
 
+    # Position event detection (portfolios)
+    if os.environ.get("POLYGON_API_KEY"):
+        try:
+            from portfolios.events import detect_events_for_all_accounts
+            n_events = detect_events_for_all_accounts(conn)
+            if n_events:
+                print(f"[poller] detected {n_events} position events (pending review)")
+        except Exception as exc:
+            print(f"[poller] event detection failed: {exc}")
+
     alerts_sent = 0
     for item, cid in persisted:
         should_alert = force_alert or (
