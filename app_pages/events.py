@@ -30,6 +30,10 @@ def render() -> None:
     c2.metric("Confirmed", confirmed)
     c3.metric("Total events", total)
 
+    # Rollup charts over confirmed events
+    with st.expander("Feedback-loop analytics", expanded=True):
+        _render_rollup_charts(conn)
+
     # Filters
     fcols = st.columns([1, 1, 1, 1])
     with fcols[0]:
@@ -93,6 +97,53 @@ def render() -> None:
         format_func=lambda i: _event_label(conn, i),
     )
     _render_review(conn, pick_id)
+
+
+def _render_rollup_charts(conn) -> None:
+    from portfolios import analytics
+    import plotly.express as px
+
+    pnl = analytics.pnl_by_catalyst_type(conn)
+    hit = analytics.hit_rate_by_catalyst_type(conn)
+    linked = analytics.linked_vs_unlinked(conn)
+
+    if not pnl:
+        st.caption("No confirmed events yet — confirm some below to populate these charts.")
+        return
+
+    cc = st.columns(3)
+    pnl_df = pd.DataFrame(pnl)
+    fig1 = px.bar(pnl_df, x="net_pnl", y="catalyst_type", orientation="h",
+                   color="net_pnl", color_continuous_scale="RdYlGn",
+                   title="Net P&L by catalyst type")
+    fig1.update_layout(coloraxis_showscale=False, height=260,
+                        yaxis_title="", xaxis_title="$")
+    cc[0].plotly_chart(fig1, width="stretch")
+
+    if hit:
+        hit_df = pd.DataFrame(hit)
+        hit_df["hit_rate_pct"] = (hit_df["hit_rate"] * 100).round(1)
+        fig2 = px.bar(hit_df, x="hit_rate_pct", y="catalyst_type",
+                       orientation="h", color="hit_rate_pct",
+                       color_continuous_scale="RdYlGn", range_color=[0, 100],
+                       title="Hit rate (% gains) by type")
+        fig2.update_layout(coloraxis_showscale=False, height=260,
+                            yaxis_title="", xaxis_title="%")
+        cc[1].plotly_chart(fig2, width="stretch")
+
+    total = linked["linked"] + linked["unlinked"]
+    if total > 0:
+        link_df = pd.DataFrame([
+            {"kind": "Linked",   "count": linked["linked"]},
+            {"kind": "Unlinked", "count": linked["unlinked"]},
+        ])
+        fig3 = px.pie(link_df, values="count", names="kind",
+                       title=f"Linked vs unlinked events ({total})",
+                       color="kind",
+                       color_discrete_map={"Linked": "#2E7D32",
+                                             "Unlinked": "#C62828"})
+        fig3.update_layout(height=260)
+        cc[2].plotly_chart(fig3, width="stretch")
 
 
 def _event_label(conn, event_id: int) -> str:
