@@ -216,6 +216,9 @@ def migrate(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
     conn.commit()
+    # Portfolio seeded profiles (idempotent via UNIQUE name + INSERT OR IGNORE)
+    from portfolios.profiles import seed_builtin_profiles
+    seed_builtin_profiles(conn)
 
 
 def _now() -> str:
