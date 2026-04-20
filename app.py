@@ -10,6 +10,7 @@ import streamlit as st
 st.set_page_config(page_title="Dealscout", page_icon="📈", layout="wide")
 
 from app_pages import (
+    accounts,
     catalysts_page,
     dashboard,
     holdings,
@@ -55,6 +56,8 @@ _nav = st.navigation([
             url_path="catalysts"),
     st.Page(options_pulse.render,   title="Options Pulse", icon="📈",
             url_path="options-pulse"),
+    st.Page(accounts.render,        title="Accounts",      icon="🏦",
+            url_path="accounts"),
     st.Page(power_gauge.render,     title="Power Gauge",   icon="⚡",
             url_path="power-gauge"),
     st.Page(holdings.render,        title="Holdings",      icon="💼",
