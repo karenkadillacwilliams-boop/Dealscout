@@ -13,6 +13,7 @@ from app_pages import (
     accounts,
     catalysts_page,
     dashboard,
+    events,
     holdings,
     import_trades,
     ipo_tracker,
@@ -36,11 +37,17 @@ def _sidebar_header() -> None:
     total_opts = conn.execute(
         "SELECT COUNT(*) FROM options_snapshot"
     ).fetchone()[0]
+    pending_events = cdb.pending_event_count(conn)
 
     st.sidebar.caption(f"Universe: {len(tickers)} tickers")
     st.sidebar.caption(f"Last catalyst poll: {last_poll or '—'}")
     if unseen:
         st.sidebar.warning(f"🔴 {unseen} unseen alert{'s' if unseen != 1 else ''}")
+    if pending_events:
+        st.sidebar.warning(
+            f"⚡ {pending_events} position event{'s' if pending_events != 1 else ''} "
+            f"to review"
+        )
     if total_opts:
         st.sidebar.caption(f"Options tracked: {total_opts}")
     if st.sidebar.button("🔄 Refresh prices"):
@@ -59,6 +66,8 @@ _nav = st.navigation([
             url_path="options-pulse"),
     st.Page(accounts.render,        title="Accounts",      icon="🏦",
             url_path="accounts"),
+    st.Page(events.render,          title="Events",        icon="⚡",
+            url_path="events"),
     st.Page(import_trades.render,   title="Import",        icon="⬆",
             url_path="import"),
     st.Page(power_gauge.render,     title="Power Gauge",   icon="⚡",
