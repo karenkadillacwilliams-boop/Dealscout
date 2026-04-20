@@ -1,0 +1,4 @@
+Account Number,Trade Date,Settlement Date,Transaction Type,Symbol,Quantity,Price,Principal Amount
+12345678,04/10/2026,04/12/2026,Buy,NVDA,10,500.00,-5000.00
+12345678,04/11/2026,04/13/2026,Buy,AAPL,5,200.00,-1000.00
+12345678,04/12/2026,04/14/2026,Sell,NVDA,4,520.00,2080.00
