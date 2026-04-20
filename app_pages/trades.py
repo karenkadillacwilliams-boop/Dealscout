@@ -57,7 +57,11 @@ def render() -> None:
                     if was_new:
                         st.success(f"Recorded {side} {qty} {ticker} @ ${price:.2f}")
                     else:
-                        st.info(f"Duplicate trade skipped (trade #{tid} already exists).")
+                        st.info(
+                            f"This trade matches an existing record (trade #{tid}). "
+                            "If you placed two separate fills with identical details, "
+                            "adjust the qty or add a note to distinguish them."
+                        )
                 except ValueError as e:
                     st.error(str(e))
 

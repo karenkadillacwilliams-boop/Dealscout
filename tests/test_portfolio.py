@@ -70,3 +70,5 @@ def test_positions_all_accounts(tmp_db):
     # Same ticker across accounts stays as two rows so we can see per-account
     assert len(df) == 2
     assert set(df["account_name"]) == {"A", "B"}
+    assert "account_id" in df.columns
+    assert set(df["account_id"]) == {a, b}

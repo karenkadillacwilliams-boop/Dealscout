@@ -71,7 +71,7 @@ def render() -> None:
             "Avg cost": "${:,.2f}", "Last": "${:,.2f}",
             "Market value": "${:,.2f}", "Unrealized P/L": "${:,.2f}",
             "Realized P/L": "${:,.2f}", "Total P/L": "${:,.2f}",
-        }),
+        }, na_rep="—"),
         width="stretch", hide_index=True,
     )
 
