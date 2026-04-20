@@ -142,3 +142,48 @@ def test_apply_profile_rejects_untranslated_side():
     # 2 BUYs valid, 1 SELL rejected (dividend also rejected)
     assert len(result.valid) == 2
     assert len(result.rejected) == 2  # SELL + DIVIDEND
+
+
+def test_apply_profile_skip_if_action_contains_dividend():
+    """row_filter skips rows whose action-column cell contains any listed token."""
+    profile = {
+        "column_map": {
+            "ticker": "Symbol", "side": "Action", "qty": "Quantity",
+            "price": "Price", "trade_date": "Run Date",
+        },
+        "value_map": {
+            "side": {"YOU BOUGHT": "BUY", "YOU SOLD": "SELL"},
+        },
+        "row_filter": {
+            "skip_if_action_contains": ["DIVIDEND", "INTEREST"],
+        },
+    }
+    csv_text = (FIXTURES / "fidelity.csv").read_text()
+    result = importer.apply_profile(csv_text, profile)
+    # All 3 trade rows valid; dividend row counted as skipped, not rejected.
+    assert len(result.valid) == 3
+    assert result.skipped == 1
+    assert len(result.rejected) == 0
+
+
+def test_apply_profile_no_value_map_passes_side_verbatim():
+    """When value_map is absent, the side cell must already be BUY or SELL."""
+    profile = {
+        "column_map": {
+            "ticker": "Symbol", "side": "Direction", "qty": "Quantity",
+            "price": "Price", "trade_date": "TradeTime",
+        },
+        "value_map": {},  # no side translation
+        "row_filter": {},
+    }
+    csv_text = (FIXTURES / "moomoo.csv").read_text()
+    result = importer.apply_profile(csv_text, profile)
+    assert len(result.valid) == 3
+    assert result.valid[0].side == "BUY"
+    assert result.valid[2].side == "SELL"
+
+
+def test_normalize_price_strips_commas_from_paren_negative():
+    """Regression: $ and commas inside parens were not stripped before float()."""
+    assert importer.normalize_price("($1,234.56)") == 1234.56
+    assert importer.normalize_price("($12,345.00)") == 12345.00

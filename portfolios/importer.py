@@ -66,7 +66,7 @@ def normalize_price(value: Any) -> float:
     s = str(value).strip()
     m = _PAREN_NEG_RE.match(s)
     if m:
-        s = m.group(1)  # treat parens as magnitude (broker uses ($500) for "you paid $500")
+        s = _MONEY_RE.sub("", m.group(1))  # strip commas ("1,234.56" → "1234.56")
     else:
         s = _MONEY_RE.sub("", s)
         if s.startswith("-"):
@@ -81,13 +81,17 @@ def normalize_price(value: Any) -> float:
 
 
 def parse_date(value: Any) -> str:
-    """Accept YYYY-MM-DD, MM/DD/YYYY, M/D/YYYY → ISO date; reject future dates."""
+    """Accept YYYY-MM-DD and MM/DD/YYYY (US format) → ISO date; reject future dates.
+
+    European DD/MM/YYYY is not auto-detected — use an explicit profile hint
+    if support is needed later (not required for the 5 seed brokers, all US).
+    """
     if value is None or value == "":
         raise ValueError("empty date")
     s = str(value).strip()
     # Strip time portion if present (MooMoo: "2026-04-10 09:45:00")
     s = s.split(" ")[0].split("T")[0]
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y"):
         try:
             d = datetime.strptime(s, fmt).date()
             break
