@@ -599,6 +599,8 @@ def insert_trade(
         row = conn.execute(
             "SELECT id FROM trades WHERE dedup_key=?", (dedup,)
         ).fetchone()
+        if row is None:
+            raise  # not a dedup collision — propagate the real error (FK violation, etc.)
         return int(row[0]), False
 
 
@@ -658,6 +660,8 @@ def insert_event(
             "AND event_date=? AND move_window=?",
             (account_id, ticker.upper(), event_date, move_window),
         ).fetchone()
+        if row is None:
+            raise
         return int(row[0]), False
 
 

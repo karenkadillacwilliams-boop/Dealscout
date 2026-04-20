@@ -100,13 +100,16 @@ def test_insert_trade_and_compute_dedup_key(tmp_db):
 def test_insert_duplicate_trade_is_noop(tmp_db):
     cdb.migrate(tmp_db)
     acc = _make_acc(tmp_db)
-    cdb.insert_trade(tmp_db, account_id=acc, ticker="NVDA", side="BUY",
-                      qty=10.0, price=500.0, trade_date="2026-04-10")
+    tid1, _ = cdb.insert_trade(
+        tmp_db, account_id=acc, ticker="NVDA", side="BUY",
+        qty=10.0, price=500.0, trade_date="2026-04-10",
+    )
     tid2, was_new = cdb.insert_trade(
         tmp_db, account_id=acc, ticker="NVDA", side="BUY",
         qty=10.0, price=500.0, trade_date="2026-04-10",
     )
     assert was_new is False
+    assert tid2 == tid1
     count = tmp_db.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
     assert count == 1
 
@@ -168,10 +171,14 @@ def test_1d_and_5d_events_on_same_day_coexist(tmp_db):
                                    value_before=4700.0, value_after=5300.0,
                                    pnl_dollars=600.0)
     assert was_new is True
-    assert tmp_db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 2
+    rows = cdb.load_events(tmp_db, account_id=acc)
+    assert len(rows) == 2
+    windows = {r["move_window"] for r in rows}
+    assert windows == {"1d", "5d"}
 
 
 def test_update_event_status_and_confirmed_at(tmp_db):
+    from datetime import datetime, timezone, timedelta
     cdb.migrate(tmp_db)
     acc = _make_acc(tmp_db)
     eid, _ = cdb.insert_event(
@@ -186,6 +193,8 @@ def test_update_event_status_and_confirmed_at(tmp_db):
     assert row["status"] == "confirmed"
     assert row["catalyst_type"] == "earnings"
     assert row["confirmed_at"] is not None
+    ts = datetime.fromisoformat(row["confirmed_at"])
+    assert datetime.now(timezone.utc) - ts < timedelta(seconds=5)
 
 
 def test_load_pending_events_excludes_dismissed(tmp_db):
