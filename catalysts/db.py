@@ -562,3 +562,204 @@ def update_account(
             (fields["active"], account_id),
         )
     conn.commit()
+
+
+def _trade_dedup_key(
+    account_id: int, ticker: str, side: str,
+    qty: float, price: float, trade_date: str,
+) -> str:
+    return f"{account_id}|{ticker.upper()}|{side}|{qty:.6f}|{price:.6f}|{trade_date}"
+
+
+def insert_trade(
+    conn: sqlite3.Connection,
+    *,
+    account_id: int,
+    ticker: str,
+    side: str,
+    qty: float,
+    price: float,
+    trade_date: str,
+    notes: str | None = None,
+    import_batch_id: int | None = None,
+) -> tuple[int, bool]:
+    """Insert a trade; on dedup_key conflict return (existing_id, False)."""
+    dedup = _trade_dedup_key(account_id, ticker, side, qty, price, trade_date)
+    try:
+        cur = conn.execute(
+            "INSERT INTO trades(account_id,ticker,side,qty,price,trade_date,"
+            "notes,import_batch_id,dedup_key,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (account_id, ticker.upper(), side, qty, price, trade_date,
+             notes, import_batch_id, dedup, _now()),
+        )
+        conn.commit()
+        return int(cur.lastrowid), True
+    except sqlite3.IntegrityError:
+        row = conn.execute(
+            "SELECT id FROM trades WHERE dedup_key=?", (dedup,)
+        ).fetchone()
+        return int(row[0]), False
+
+
+def load_trades(
+    conn: sqlite3.Connection,
+    *,
+    account_id: int | None = None,
+    ticker: str | None = None,
+) -> list[dict]:
+    q = "SELECT * FROM trades WHERE 1=1"
+    params: list = []
+    if account_id is not None:
+        q += " AND account_id=?"
+        params.append(account_id)
+    if ticker is not None:
+        q += " AND ticker=?"
+        params.append(ticker.upper())
+    q += " ORDER BY trade_date DESC, id DESC"
+    return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def delete_trade(conn: sqlite3.Connection, trade_id: int) -> None:
+    conn.execute("DELETE FROM trades WHERE id=?", (trade_id,))
+    conn.commit()
+
+
+def insert_event(
+    conn: sqlite3.Connection,
+    *,
+    account_id: int,
+    ticker: str,
+    event_date: str,
+    move_pct: float,
+    move_window: str,
+    position_qty: float,
+    value_before: float,
+    value_after: float,
+    pnl_dollars: float,
+    catalyst_id: int | None = None,
+) -> tuple[int, bool]:
+    """Insert an event; on UNIQUE conflict return (existing_id, False)."""
+    try:
+        cur = conn.execute(
+            "INSERT INTO events(account_id,ticker,event_date,move_pct,"
+            "move_window,position_qty,value_before,value_after,pnl_dollars,"
+            "catalyst_id,status,detected_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?)",
+            (account_id, ticker.upper(), event_date, move_pct, move_window,
+             position_qty, value_before, value_after, pnl_dollars,
+             catalyst_id, _now()),
+        )
+        conn.commit()
+        return int(cur.lastrowid), True
+    except sqlite3.IntegrityError:
+        row = conn.execute(
+            "SELECT id FROM events WHERE account_id=? AND ticker=? "
+            "AND event_date=? AND move_window=?",
+            (account_id, ticker.upper(), event_date, move_window),
+        ).fetchone()
+        return int(row[0]), False
+
+
+def load_events(
+    conn: sqlite3.Connection,
+    *,
+    account_id: int | None = None,
+    status: str | None = None,
+    ticker: str | None = None,
+    since_days: int | None = None,
+) -> list[dict]:
+    q = "SELECT * FROM events WHERE 1=1"
+    params: list = []
+    if account_id is not None:
+        q += " AND account_id=?"
+        params.append(account_id)
+    if status is not None:
+        q += " AND status=?"
+        params.append(status)
+    if ticker is not None:
+        q += " AND ticker=?"
+        params.append(ticker.upper())
+    if since_days is not None:
+        q += " AND date(event_date) >= date('now', ?)"
+        params.append(f"-{since_days} days")
+    q += " ORDER BY event_date DESC, detected_at DESC"
+    return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def load_event(conn: sqlite3.Connection, event_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def pending_event_count(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM events WHERE status='pending'"
+    ).fetchone()[0]
+
+
+def update_event(conn: sqlite3.Connection, event_id: int, **fields) -> None:
+    """Update status / catalyst_id / catalyst_type / notes.
+    If status becomes 'confirmed', stamps confirmed_at."""
+    if "status" in fields:
+        conn.execute(
+            "UPDATE events SET status=? WHERE id=?",
+            (fields["status"], event_id),
+        )
+    if "catalyst_id" in fields:
+        conn.execute(
+            "UPDATE events SET catalyst_id=? WHERE id=?",
+            (fields["catalyst_id"], event_id),
+        )
+    if "catalyst_type" in fields:
+        conn.execute(
+            "UPDATE events SET catalyst_type=? WHERE id=?",
+            (fields["catalyst_type"], event_id),
+        )
+    if "notes" in fields:
+        conn.execute(
+            "UPDATE events SET notes=? WHERE id=?",
+            (fields["notes"], event_id),
+        )
+    if fields.get("status") == "confirmed":
+        conn.execute(
+            "UPDATE events SET confirmed_at=? WHERE id=?",
+            (_now(), event_id),
+        )
+    conn.commit()
+
+
+def create_import_batch(
+    conn: sqlite3.Connection,
+    *,
+    account_id: int,
+    profile_id: int | None,
+    filename: str,
+    row_count: int,
+    inserted: int,
+    duplicates: int,
+    rejected: int = 0,
+    notes: str | None = None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO import_batches(account_id,profile_id,filename,row_count,"
+        "inserted,duplicates,rejected,imported_at,notes) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (account_id, profile_id, filename, row_count, inserted, duplicates,
+         rejected, _now(), notes),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def load_import_batches(
+    conn: sqlite3.Connection, account_id: int | None = None, limit: int = 50,
+) -> list[dict]:
+    q = "SELECT * FROM import_batches"
+    params: list = []
+    if account_id is not None:
+        q += " WHERE account_id=?"
+        params.append(account_id)
+    q += " ORDER BY imported_at DESC LIMIT ?"
+    params.append(limit)
+    return [dict(r) for r in conn.execute(q, params).fetchall()]
