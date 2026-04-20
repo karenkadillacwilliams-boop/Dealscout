@@ -517,6 +517,10 @@ def update_account(
     Each column is updated via its own fully-literal parameterised statement
     so no user-supplied text ever touches the SQL template.
     """
+    if not conn.execute(
+        "SELECT 1 FROM accounts WHERE id=?", (account_id,)
+    ).fetchone():
+        raise ValueError(f"account {account_id} not found")
     if "name" in fields:
         conn.execute(
             "UPDATE accounts SET name=? WHERE id=?",

@@ -54,3 +54,28 @@ def test_account_event_thresholds_are_optional(tmp_db):
     row = cdb.load_accounts(tmp_db)[0]
     assert row["event_daily_pct"] == 3.0
     assert row["event_5day_pct"] == 7.5
+
+
+def test_update_account_changes_fields(tmp_db):
+    cdb.migrate(tmp_db)
+    acc_id = cdb.create_account(
+        tmp_db, name="Original", type="taxable", broker="fidelity",
+        opened_date="2024-01-01", initial_cash=1000.0,
+    )
+    cdb.update_account(
+        tmp_db, acc_id, name="Renamed", initial_cash=2500.0, event_daily_pct=4.0,
+    )
+    row = cdb.load_account(tmp_db, acc_id)
+    assert row["name"] == "Renamed"
+    assert row["initial_cash"] == 2500.0
+    assert row["event_daily_pct"] == 4.0
+    # Untouched fields preserved
+    assert row["type"] == "taxable"
+    assert row["broker"] == "fidelity"
+    assert row["opened_date"] == "2024-01-01"
+
+
+def test_update_account_unknown_id_raises(tmp_db):
+    cdb.migrate(tmp_db)
+    with pytest.raises(ValueError, match="account 9999 not found"):
+        cdb.update_account(tmp_db, 9999, name="ghost")

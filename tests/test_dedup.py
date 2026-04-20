@@ -22,11 +22,13 @@ def test_recently_alerted(tmp_db):
     from datetime import datetime, timezone
     cdb.migrate(tmp_db)
     assert recently_alerted(tmp_db, "NVDA", 8, hours=6) is False
+    # Insert a real catalyst so the FK constraint on alert_log is satisfied
+    cat_id = cdb.persist_catalyst(tmp_db, _mk())
     sent_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     tmp_db.execute(
         "INSERT INTO alert_log(catalyst_id,ticker,score_bucket,channels,sent_at,ok) "
-        "VALUES(1,'NVDA',8,'[\"email\"]', ?, 1)",
-        (sent_at,),
+        "VALUES(?,'NVDA',8,'[\"email\"]', ?, 1)",
+        (cat_id, sent_at),
     )
     tmp_db.commit()
     assert recently_alerted(tmp_db, "NVDA", 8, hours=6) is True
