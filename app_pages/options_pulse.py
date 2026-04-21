@@ -55,16 +55,10 @@ def render() -> None:
     opts_rows = cdb.load_all_options(conn)
     if not opts_rows:
         import os
-        from catalysts.market_status import is_market_open
 
         reasons = []
         if not os.environ.get("POLYGON_API_KEY"):
             reasons.append("POLYGON_API_KEY is not set — options require a Polygon key.")
-        elif not is_market_open():
-            reasons.append(
-                "The US equity market is currently closed. Options are only "
-                "fetched during market hours (including extended-hours trading)."
-            )
         else:
             reasons.append(
                 "The poller hasn't populated options yet. Run `python catalyst_poller.py`."
