@@ -75,7 +75,8 @@ def _auto_link(conn, account_id: int, ticker: str, event_date_iso: str) -> int |
     row = conn.execute(
         "SELECT id FROM catalysts "
         "WHERE ticker=? "
-        "AND ABS(julianday(substr(published_at, 1, 10)) - julianday(?)) <= ? "
+        "AND date(published_at) IS NOT NULL "
+        "AND ABS(julianday(date(published_at)) - julianday(?)) <= ? "
         "AND final_score >= ? "
         "ORDER BY final_score DESC LIMIT 1",
         (ticker, event_date_iso, CATALYST_LINK_WINDOW_DAYS, CATALYST_MIN_LINK_SCORE),

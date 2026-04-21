@@ -187,3 +187,39 @@ def test_normalize_price_strips_commas_from_paren_negative():
     """Regression: $ and commas inside parens were not stripped before float()."""
     assert importer.normalize_price("($1,234.56)") == 1234.56
     assert importer.normalize_price("($12,345.00)") == 12345.00
+
+
+def test_commit_to_db_audit_row_accurate_on_mid_loop_exception(tmp_db, monkeypatch):
+    """If insert_trade raises mid-loop, the batch row still reflects what was committed."""
+    from catalysts import db as cdb
+    from portfolios import importer as imp
+    cdb.migrate(tmp_db)
+    acc = cdb.create_account(tmp_db, name="X", type="taxable",
+                               broker="other", opened_date="2024-01-01")
+    # First two rows valid; third will raise on insert_trade
+    rows = [
+        imp.ImportRow(ticker="NVDA", side="BUY", qty=1.0, price=500.0,
+                       trade_date="2026-04-10", raw={}),
+        imp.ImportRow(ticker="AAPL", side="BUY", qty=2.0, price=200.0,
+                       trade_date="2026-04-11", raw={}),
+        imp.ImportRow(ticker="TSLA", side="BUY", qty=3.0, price=300.0,
+                       trade_date="2026-04-12", raw={}),
+    ]
+    real_insert = cdb.insert_trade
+    calls = [0]
+
+    def _insert_fail_on_third(*args, **kwargs):
+        calls[0] += 1
+        if calls[0] == 3:
+            raise RuntimeError("boom")
+        return real_insert(*args, **kwargs)
+
+    monkeypatch.setattr(cdb, "insert_trade", _insert_fail_on_third)
+    with pytest.raises(RuntimeError):
+        imp.commit_to_db(tmp_db, account_id=acc, rows=rows,
+                          profile_id=None, filename="x.csv")
+
+    batch_rows = cdb.load_import_batches(tmp_db, account_id=acc)
+    assert len(batch_rows) == 1
+    assert batch_rows[0]["inserted"] == 2
+    assert batch_rows[0]["duplicates"] == 0

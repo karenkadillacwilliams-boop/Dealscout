@@ -24,11 +24,19 @@ class ImportRow:
     trade_date: str
     raw: dict[str, Any]  # original CSV cells, for display/debug
 
+    def __repr__(self) -> str:
+        return (f"ImportRow(ticker={self.ticker!r}, side={self.side!r}, "
+                f"qty={self.qty}, price={self.price}, "
+                f"trade_date={self.trade_date!r}, raw=<{len(self.raw)} fields>)")
+
 
 @dataclass
 class RejectedRow:
     raw: dict[str, Any]
     reason: str
+
+    def __repr__(self) -> str:
+        return f"RejectedRow(reason={self.reason!r}, raw=<{len(self.raw)} fields>)"
 
 
 @dataclass
@@ -179,7 +187,7 @@ def commit_to_db(conn, account_id: int, rows: list[ImportRow],
                  profile_id: int | None, filename: str,
                  rejected_count: int = 0) -> dict:
     """Insert rows into trades table with dedup + record an import_batch.
-    Returns {inserted, duplicates}."""
+    Returns {batch_id, inserted, duplicates}."""
     from catalysts import db as cdb
     inserted = 0
     duplicates = 0
@@ -189,20 +197,23 @@ def commit_to_db(conn, account_id: int, rows: list[ImportRow],
         filename=filename, row_count=len(rows) + rejected_count,
         inserted=0, duplicates=0, rejected=rejected_count,
     )
-    for r in rows:
-        _tid, was_new = cdb.insert_trade(
-            conn, account_id=account_id, ticker=r.ticker, side=r.side,
-            qty=r.qty, price=r.price, trade_date=r.trade_date,
-            import_batch_id=batch_id,
+    try:
+        for r in rows:
+            _tid, was_new = cdb.insert_trade(
+                conn, account_id=account_id, ticker=r.ticker, side=r.side,
+                qty=r.qty, price=r.price, trade_date=r.trade_date,
+                import_batch_id=batch_id,
+            )
+            if was_new:
+                inserted += 1
+            else:
+                duplicates += 1
+    finally:
+        # Always update the batch row so the audit trail matches reality,
+        # even if the loop raised mid-way.
+        conn.execute(
+            "UPDATE import_batches SET inserted=?, duplicates=? WHERE id=?",
+            (inserted, duplicates, batch_id),
         )
-        if was_new:
-            inserted += 1
-        else:
-            duplicates += 1
-    # Update the batch with final counts
-    conn.execute(
-        "UPDATE import_batches SET inserted=?, duplicates=? WHERE id=?",
-        (inserted, duplicates, batch_id),
-    )
-    conn.commit()
+        conn.commit()
     return {"batch_id": batch_id, "inserted": inserted, "duplicates": duplicates}

@@ -210,6 +210,14 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         conn.commit()
         alerts_sent += 1
 
+    # Aggregate visibility — approx Polygon calls per run (for rate-budget tuning)
+    approx_polygon_calls = (
+        len(tickers)                                         # options chains (1/ticker)
+        + len(tickers) * 3                                   # technicals (3/ticker)
+        + (n_filled if 'n_filled' in dir() else 0)           # iv backfill
+        + (n_events if 'n_events' in dir() else 0)           # detector bars (~1/unique held ticker)
+    )
+    print(f"[poller] approx polygon calls this run: {approx_polygon_calls}")
     print(f"[poller] persisted {len(reranked)} catalysts, {alerts_sent} alerts sent")
     return 0
 
