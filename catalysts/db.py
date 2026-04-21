@@ -120,6 +120,18 @@ CREATE TABLE IF NOT EXISTS related_tickers (
     PRIMARY KEY (ticker)
 );
 
+CREATE TABLE IF NOT EXISTS triple_play (
+  ticker             TEXT PRIMARY KEY,
+  score              REAL NOT NULL,
+  eps_surprise_pct   REAL,
+  revenue_surprise_pct REAL,
+  bullish_share_delta  REAL,
+  days_since_report  INTEGER,
+  is_full_triple_play INTEGER NOT NULL DEFAULT 0,
+  report_period      TEXT,
+  updated_at         TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT    NOT NULL UNIQUE,
@@ -770,3 +782,53 @@ def load_import_batches(
     q += " ORDER BY imported_at DESC LIMIT ?"
     params.append(limit)
     return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def upsert_triple_play(
+    conn: sqlite3.Connection,
+    ticker: str,
+    score: float,
+    eps: float | None,
+    revenue: float | None,
+    guidance_delta: float | None,
+    days: int,
+    is_full: bool,
+    report_period: str | None,
+) -> None:
+    conn.execute(
+        """INSERT INTO triple_play
+           (ticker, score, eps_surprise_pct, revenue_surprise_pct,
+            bullish_share_delta, days_since_report, is_full_triple_play,
+            report_period, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(ticker) DO UPDATE SET
+              score=excluded.score,
+              eps_surprise_pct=excluded.eps_surprise_pct,
+              revenue_surprise_pct=excluded.revenue_surprise_pct,
+              bullish_share_delta=excluded.bullish_share_delta,
+              days_since_report=excluded.days_since_report,
+              is_full_triple_play=excluded.is_full_triple_play,
+              report_period=excluded.report_period,
+              updated_at=excluded.updated_at""",
+        (
+            ticker.upper(), score, eps, revenue, guidance_delta,
+            days, 1 if is_full else 0, report_period, _now(),
+        ),
+    )
+    conn.commit()
+
+
+def load_triple_play(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Return {ticker: row_dict} for all rows."""
+    rows = conn.execute("SELECT * FROM triple_play").fetchall()
+    return {r["ticker"]: dict(r) for r in rows}
+
+
+def load_triple_play_fresh(conn: sqlite3.Connection, max_age_hours: int = 24) -> set[str]:
+    """Return set of tickers whose updated_at is within max_age_hours."""
+    rows = conn.execute(
+        "SELECT ticker FROM triple_play "
+        "WHERE datetime(updated_at) >= datetime('now', ?)",
+        (f"-{max_age_hours} hours",),
+    ).fetchall()
+    return {r["ticker"] for r in rows}

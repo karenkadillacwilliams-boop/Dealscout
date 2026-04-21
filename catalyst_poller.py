@@ -181,6 +181,31 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         except Exception as exc:
             print(f"[poller] technicals failed: {exc}")
 
+    # Triple-play (post-earnings fundamental momentum) — Finnhub + yfinance
+    if os.environ.get("FINNHUB_API_KEY"):
+        from catalysts.earnings import get_earnings_data
+        from catalysts.triple_play import score_triple_play
+        try:
+            fresh = cdb.load_triple_play_fresh(conn, max_age_hours=24)
+            stale_tickers = [t for t in tickers if t not in fresh]
+            tp_count = 0
+            for t in stale_tickers:
+                data = get_earnings_data(t)
+                score_tp = score_triple_play(data)
+                cdb.upsert_triple_play(
+                    conn, ticker=t, score=score_tp.score,
+                    eps=score_tp.eps_component, revenue=score_tp.revenue_component,
+                    guidance_delta=score_tp.guidance_component,
+                    days=score_tp.days_since_report,
+                    is_full=score_tp.is_full_triple_play,
+                    report_period=score_tp.report_period,
+                )
+                tp_count += 1
+            if tp_count:
+                print(f"[poller] triple-play scored {tp_count} tickers ({len(fresh)} fresh)")
+        except Exception as exc:
+            print(f"[poller] triple-play failed: {exc}")
+
     # Position event detection (portfolios)
     if os.environ.get("POLYGON_API_KEY"):
         try:
