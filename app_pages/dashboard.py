@@ -136,6 +136,18 @@ def render() -> None:
 
     view["events"] = view["ticker"].map(_event_cell)
 
+    # Triple-play score (post-earnings momentum)
+    tp_data = cdb.load_triple_play(conn)
+
+    def _tp_cell(ticker: str) -> str:
+        row = tp_data.get(ticker)
+        if not row:
+            return "—"
+        prefix = "🎯 " if row["is_full_triple_play"] else ""
+        return f"{prefix}{row['score']:.0f}"
+
+    view["triple_play"] = view["ticker"].map(_tp_cell)
+
     view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
     view = view.rename(columns={
         "ticker": "Ticker", "name": "Name", "last": "Last",
@@ -145,10 +157,11 @@ def render() -> None:
         "options": "Options", "iv_rank": "IV Rank",
         "earnings_dte": "Earn DTE", "entry": "Entry",
         "tech": "Tech", "events": "Events",
+        "triple_play": "Triple",
     })
 
     display_cols = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
-                    "Monthly %", "YTD %", "Grade", "Tech", "Events", "Catalyst",
+                    "Monthly %", "YTD %", "Grade", "Triple", "Tech", "Events", "Catalyst",
                     "Options", "IV Rank", "Earn DTE", "Entry"]
 
     def _pct_bar(val):
@@ -183,6 +196,21 @@ def render() -> None:
             return "color: #dc3545; font-weight: bold"
         return ""
 
+    def _triple_color(val):
+        import re
+        # Strip emoji prefix for parsing
+        m = re.search(r"(\d+)", str(val))
+        if not m:
+            return ""
+        n = int(m.group(1))
+        if n >= 70:
+            return "color: #28a745; font-weight: bold"
+        if n >= 55:
+            return "color: #fd7e14"
+        if n <= 35:
+            return "color: #dc3545"
+        return ""
+
     styled = (
         view[display_cols].style
         .format({
@@ -197,6 +225,7 @@ def render() -> None:
         .map(_ivr_color, subset=["IV Rank"])
         .map(_dte_color, subset=["Earn DTE"])
         .map(_tech_color, subset=["Tech"])
+        .map(_triple_color, subset=["Triple"])
     )
     st.dataframe(styled, width="stretch", hide_index=True)
 
