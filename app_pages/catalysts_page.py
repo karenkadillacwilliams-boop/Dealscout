@@ -12,6 +12,33 @@ from catalysts import db as cdb
 from app_pages.shared import get_conn
 
 
+def _render_portfolio_events_for_catalyst(conn, catalyst_id: int) -> None:
+    from portfolios import analytics
+    rows = analytics.events_for_catalyst(conn, catalyst_id)
+    st.subheader("Did this catalyst move my portfolio?")
+    if not rows:
+        # Find ticker for helpful suggestion
+        tr = conn.execute(
+            "SELECT ticker FROM catalysts WHERE id=?", (catalyst_id,),
+        ).fetchone()
+        tk = tr["ticker"] if tr else "this ticker"
+        st.caption(f"No position events linked yet. Add {tk} to a portfolio "
+                    f"(Import or Trades) to start tracking this catalyst's impact.")
+        return
+    df = pd.DataFrame(rows)[[
+        "account_name", "ticker", "event_date", "move_window",
+        "move_pct", "pnl_dollars", "catalyst_type", "status",
+    ]].rename(columns={
+        "account_name": "Account", "ticker": "Ticker", "event_date": "Date",
+        "move_window": "Win", "move_pct": "Move %",
+        "pnl_dollars": "P&L $", "catalyst_type": "Tag", "status": "Status",
+    })
+    st.dataframe(
+        df.style.format({"Move %": "{:+.2f}%", "P&L $": "${:,.2f}"}),
+        width="stretch", hide_index=True,
+    )
+
+
 def _staleness_banner(conn) -> None:
     """Show last-poll time + most-recent-catalyst so users understand empty states."""
     last_poll = cdb.last_poll_time(conn)
@@ -137,6 +164,9 @@ def render() -> None:
         st.link_button("Open source", row["url"])
     else:
         st.text(row["url"] or "(no url)")
+
+    # Feedback loop: did this catalyst move any positions?
+    _render_portfolio_events_for_catalyst(conn, row["id"])
 
     st.subheader("Catalyst heatmap — 24h")
     heat = conn.execute(

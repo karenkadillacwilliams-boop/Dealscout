@@ -118,6 +118,24 @@ def render() -> None:
 
     view["tech"] = view["ticker"].map(_tech_label)
 
+    # Confirmed-event summary per ticker (last 30d)
+    from portfolios import analytics
+    ev_map = analytics.weekly_events_per_ticker(
+        conn, tickers=view["ticker"].tolist(), days=30,
+    )
+
+    def _event_cell(ticker: str) -> str:
+        evs = ev_map.get(ticker)
+        if not evs:
+            return "—"
+        wins = sum(1 for e in evs if e["pnl_dollars"] > 0)
+        losses = sum(1 for e in evs if e["pnl_dollars"] < 0)
+        total_pnl = evs[-1]["cumulative_pnl"]
+        sign = "+" if total_pnl >= 0 else ""
+        return f"{wins}W/{losses}L {sign}${total_pnl:,.0f}"
+
+    view["events"] = view["ticker"].map(_event_cell)
+
     view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
     view = view.rename(columns={
         "ticker": "Ticker", "name": "Name", "last": "Last",
@@ -126,11 +144,11 @@ def render() -> None:
         "grade": "Grade", "catalyst": "Catalyst",
         "options": "Options", "iv_rank": "IV Rank",
         "earnings_dte": "Earn DTE", "entry": "Entry",
-        "tech": "Tech",
+        "tech": "Tech", "events": "Events",
     })
 
     display_cols = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
-                    "Monthly %", "YTD %", "Grade", "Tech", "Catalyst",
+                    "Monthly %", "YTD %", "Grade", "Tech", "Events", "Catalyst",
                     "Options", "IV Rank", "Earn DTE", "Entry"]
 
     def _pct_bar(val):

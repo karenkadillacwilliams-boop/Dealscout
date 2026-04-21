@@ -53,3 +53,9 @@ def fmt_pct(v):
 
 def fmt_money(v):
     return "—" if pd.isna(v) else f"${v:,.2f}"
+
+
+def active_accounts() -> list[dict]:
+    """All active accounts for the current session."""
+    from catalysts import db as cdb
+    return cdb.load_accounts(get_conn())

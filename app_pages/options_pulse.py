@@ -62,8 +62,10 @@ def render() -> None:
             reasons.append("POLYGON_API_KEY is not set — options require a Polygon key.")
         elif not is_market_open():
             reasons.append(
-                "The US equity market is currently closed. Options are only "
-                "fetched during market hours (including extended-hours trading)."
+                "US equity market is currently closed. Polygon's options snapshot "
+                "returns null bid/ask/close outside of market hours (9:30am-8:00pm ET), "
+                "so the screener can't rank contracts. It will populate on the next "
+                "poll during market hours."
             )
         else:
             reasons.append(

@@ -36,6 +36,11 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     if not os.environ.get("POLYGON_API_KEY"):
         return {}
 
+    # Polygon's /v3/snapshot/options returns IV+greeks 24/7 but last_quote,
+    # day, and last_trade are all null outside regular market hours +
+    # extended-hours — so ask/bid are unusable off-hours. We skip fetching
+    # entirely; the most recent in-hours snapshot in options_snapshot stays
+    # in the DB (clear_stale_options only runs when we actually fetch).
     if not is_market_open():
         log.info("market closed, skipping options fetch")
         return {}
@@ -176,6 +181,16 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         except Exception as exc:
             print(f"[poller] technicals failed: {exc}")
 
+    # Position event detection (portfolios)
+    if os.environ.get("POLYGON_API_KEY"):
+        try:
+            from portfolios.events import detect_events_for_all_accounts
+            n_events = detect_events_for_all_accounts(conn)
+            if n_events:
+                print(f"[poller] detected {n_events} position events (pending review)")
+        except Exception as exc:
+            print(f"[poller] event detection failed: {exc}")
+
     alerts_sent = 0
     for item, cid in persisted:
         should_alert = force_alert or (
@@ -200,6 +215,14 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         conn.commit()
         alerts_sent += 1
 
+    # Aggregate visibility — approx Polygon calls per run (for rate-budget tuning)
+    approx_polygon_calls = (
+        len(tickers)                                         # options chains (1/ticker)
+        + len(tickers) * 3                                   # technicals (3/ticker)
+        + (n_filled if 'n_filled' in dir() else 0)           # iv backfill
+        + (n_events if 'n_events' in dir() else 0)           # detector bars (~1/unique held ticker)
+    )
+    print(f"[poller] approx polygon calls this run: {approx_polygon_calls}")
     print(f"[poller] persisted {len(reranked)} catalysts, {alerts_sent} alerts sent")
     return 0
 
