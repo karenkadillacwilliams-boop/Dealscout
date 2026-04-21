@@ -43,6 +43,8 @@ def _mock_polygon_response(snapshot_data, status=200):
 def test_poller_fetches_options_and_enriches_alert(monkeypatch, tmp_path):
     pc.reset_bucket_for_tests()
     market_status._cache.clear()
+    import catalyst_poller
+    monkeypatch.setattr(catalyst_poller, "is_market_open", lambda: True)
     monkeypatch.setattr(options, "date", _FixedDate)
     monkeypatch.setattr(cdb, "DB_PATH", tmp_path / "d.db")
     conn = cdb.connect(tmp_path / "d.db")
@@ -77,6 +79,8 @@ def test_poller_fetches_options_and_enriches_alert(monkeypatch, tmp_path):
 def test_poller_survives_polygon_failure(monkeypatch, tmp_path):
     pc.reset_bucket_for_tests()
     market_status._cache.clear()
+    import catalyst_poller
+    monkeypatch.setattr(catalyst_poller, "is_market_open", lambda: True)
     monkeypatch.setattr(options, "date", _FixedDate)
     monkeypatch.setattr(pc.time, "sleep", lambda _: None)
     monkeypatch.setattr(cdb, "DB_PATH", tmp_path / "d.db")

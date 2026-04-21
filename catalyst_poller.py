@@ -17,6 +17,7 @@ from catalysts import db as cdb
 from catalysts import edgar, news, score, rerank, options
 from catalysts.dedup import filter_unseen, recently_alerted
 from catalysts.iv_rank import compute_atm_avg_iv, compute_iv_rank
+from catalysts.market_status import is_market_open
 from catalysts.options_score import rank_contracts
 from catalysts.related import fetch_related
 from catalysts.types import RawCatalyst, ScoredItem, RerankedItem
@@ -35,10 +36,15 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     if not os.environ.get("POLYGON_API_KEY"):
         return {}
 
-    # Fetch unconditionally — Polygon's /v3/snapshot/options endpoint returns
-    # the last available close-of-day quote + greeks 24/7, so an after-hours
-    # poll still populates the screener with last-known prices. The Options
-    # Pulse page's "last options fetch" banner shows freshness.
+    # Polygon's /v3/snapshot/options returns IV+greeks 24/7 but last_quote,
+    # day, and last_trade are all null outside regular market hours +
+    # extended-hours — so ask/bid are unusable off-hours. We skip fetching
+    # entirely; the most recent in-hours snapshot in options_snapshot stays
+    # in the DB (clear_stale_options only runs when we actually fetch).
+    if not is_market_open():
+        log.info("market closed, skipping options fetch")
+        return {}
+
     now_str = datetime.now(timezone.utc).isoformat(timespec="seconds")
     summaries: dict[str, str] = {}
 
