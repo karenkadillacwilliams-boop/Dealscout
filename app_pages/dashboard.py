@@ -197,9 +197,11 @@ def render() -> None:
         "triple_play": "Triple",
     })
 
-    display_cols = ["Ticker", "Name", "Entry", "Last", "Daily %", "Weekly %",
-                    "Monthly %", "YTD %", "Grade", "Triple", "Tech", "Events", "Catalyst",
-                    "Options", "IV Rank", "Earn DTE", "Added"]
+    _RETURNS_COLS = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
+                     "Monthly %", "YTD %", "Grade"]
+    _SIGNALS_COLS = ["Ticker", "Triple", "Tech", "Catalyst",
+                     "Options", "IV Rank", "Earn DTE"]
+    _POSITIONS_COLS = ["Ticker", "Entry", "Last", "Events", "Added"]
 
     def _pct_bar(val):
         if pd.isna(val):
@@ -265,25 +267,52 @@ def render() -> None:
             styles[idx] = "color: #dc3545; font-weight: bold"
         return styles
 
-    styled = (
-        view[display_cols].style
-        .format({
-            "Entry": "${:,.2f}",
-            "Last": "${:,.2f}",
-            "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%",
-            "Monthly %": "{:+.2f}%", "YTD %": "{:+.2f}%",
-            "Catalyst": "{:d}",
-            "IV Rank": lambda v: f"{v:.0f}%" if pd.notna(v) else "—",
-            "Earn DTE": lambda v: f"{int(v)}d" if pd.notna(v) else "—",
-        }, na_rep="—")
-        .map(_pct_bar, subset=["Daily %", "Weekly %", "Monthly %", "YTD %"])
-        .map(_ivr_color, subset=["IV Rank"])
-        .map(_dte_color, subset=["Earn DTE"])
-        .map(_tech_color, subset=["Tech"])
-        .map(_triple_color, subset=["Triple"])
-        .apply(_entry_vs_last_row, axis=1)
+    def _style_subset(frame: pd.DataFrame, cols: list[str]):
+        """Build a Styler applying only the formatters that match the subset."""
+        present = [c for c in cols if c in frame.columns]
+        fmt_map = {}
+        if "Entry" in present:
+            fmt_map["Entry"] = "${:,.2f}"
+        if "Last" in present:
+            fmt_map["Last"] = "${:,.2f}"
+        for c in ("Daily %", "Weekly %", "Monthly %", "YTD %"):
+            if c in present:
+                fmt_map[c] = "{:+.2f}%"
+        if "Catalyst" in present:
+            fmt_map["Catalyst"] = "{:d}"
+        if "IV Rank" in present:
+            fmt_map["IV Rank"] = lambda v: f"{v:.0f}%" if pd.notna(v) else "—"
+        if "Earn DTE" in present:
+            fmt_map["Earn DTE"] = lambda v: f"{int(v)}d" if pd.notna(v) else "—"
+
+        styler = frame[present].style.format(fmt_map, na_rep="—")
+        pct_cols = [c for c in ("Daily %", "Weekly %", "Monthly %", "YTD %") if c in present]
+        if pct_cols:
+            styler = styler.map(_pct_bar, subset=pct_cols)
+        if "IV Rank" in present:
+            styler = styler.map(_ivr_color, subset=["IV Rank"])
+        if "Earn DTE" in present:
+            styler = styler.map(_dte_color, subset=["Earn DTE"])
+        if "Tech" in present:
+            styler = styler.map(_tech_color, subset=["Tech"])
+        if "Triple" in present:
+            styler = styler.map(_triple_color, subset=["Triple"])
+        if "Entry" in present and "Last" in present:
+            styler = styler.apply(_entry_vs_last_row, axis=1)
+        return styler
+
+    returns_tab, signals_tab, positions_tab = st.tabs(
+        ["Returns", "Signals", "Positions"]
     )
-    st.dataframe(styled, width="stretch", hide_index=True)
+    with returns_tab:
+        st.dataframe(_style_subset(view, _RETURNS_COLS),
+                     width="stretch", hide_index=True)
+    with signals_tab:
+        st.dataframe(_style_subset(view, _SIGNALS_COLS),
+                     width="stretch", hide_index=True)
+    with positions_tab:
+        st.dataframe(_style_subset(view, _POSITIONS_COLS),
+                     width="stretch", hide_index=True)
 
     with st.expander("Grade legend"):
         st.markdown(
