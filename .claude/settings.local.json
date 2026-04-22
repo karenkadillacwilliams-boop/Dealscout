@@ -47,7 +47,20 @@
       "WebFetch(domain:polygon.io)",
       "WebFetch(domain:massive.com)",
       "WebFetch(domain:polygon.readthedocs.io)",
-      "Bash(.venv/Scripts/python -m pytest tests/ -v --tb=short)"
+      "Bash(.venv/Scripts/python -m pytest tests/ -v --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_triple_play.py tests/test_earnings_data.py tests/test_triple_play_db.py -v)",
+      "Bash(.venv/Scripts/python -m pytest --tb=short -q)",
+      "Bash(.venv/Scripts/python -c \"from app_pages import dashboard; from catalysts import earnings, triple_play; print\\('ok'\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app_pages import dashboard; print\\('ok'\\)\")",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q)",
+      "Bash(gh api *)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=no)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_weight_learner.py tests/test_score.py -q --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -q --tb=short)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_power_gauge.py -q --tb=short)",
+      "Bash(.venv/Scripts/python -c \"import app_pages.accounts; print\\('ok'\\)\")",
+      "Bash(.venv/Scripts/python -c \"import portfolio; print\\(hasattr\\(portfolio, 'positions_all_accounts'\\)\\)\")",
+      "Bash(.venv/Scripts/python -c \"from app_pages import ipo_tracker; print\\('ok'\\)\")"
     ]
   }
 }
