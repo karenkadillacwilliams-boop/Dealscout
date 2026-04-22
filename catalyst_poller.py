@@ -148,12 +148,20 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         ], indent=2))
         return 0
 
+    # Initialize run-level counters so the end-of-run diagnostic print is always
+    # correct even when a phase is skipped or fails.
+    n_filled = 0
+    n_events = 0
+
     alert_tickers = set()
     persisted: list[tuple[RerankedItem, int]] = []
     for item in reranked:
         cid = cdb.persist_catalyst(conn, item)
         persisted.append((item, cid))
-        if item.final_score >= 70 and item.llm_score is not None:
+        # Alert gate: either LLM-reranked (llm_score set) OR a very strong
+        # keyword-only score. This prevents silent suppression of high-signal
+        # filings when the daily rerank cap is exhausted.
+        if item.final_score >= 70 and (item.llm_score is not None or item.kw_score >= 85):
             alert_tickers.add(item.ticker)
 
     # Backfill IV history for new tickers
@@ -219,7 +227,8 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     alerts_sent = 0
     for item, cid in persisted:
         should_alert = force_alert or (
-            item.final_score >= 70 and item.llm_score is not None
+            item.final_score >= 70
+            and (item.llm_score is not None or item.kw_score >= 85)
         )
         if not should_alert:
             continue
@@ -242,10 +251,10 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
 
     # Aggregate visibility — approx Polygon calls per run (for rate-budget tuning)
     approx_polygon_calls = (
-        len(tickers)                                         # options chains (1/ticker)
-        + len(tickers) * 3                                   # technicals (3/ticker)
-        + (n_filled if 'n_filled' in dir() else 0)           # iv backfill
-        + (n_events if 'n_events' in dir() else 0)           # detector bars (~1/unique held ticker)
+        len(tickers)                      # options chains (1/ticker)
+        + len(tickers) * 3                # technicals (3/ticker)
+        + n_filled                        # iv backfill (initialized to 0 above)
+        + n_events                        # detector bars (initialized to 0 above)
     )
     print(f"[poller] approx polygon calls this run: {approx_polygon_calls}")
     print(f"[poller] persisted {len(reranked)} catalysts, {alerts_sent} alerts sent")

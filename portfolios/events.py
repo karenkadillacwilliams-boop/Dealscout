@@ -72,12 +72,26 @@ def _pct_change(a: float, b: float) -> float:
 
 
 def _auto_link(conn, account_id: int, ticker: str, event_date_iso: str) -> int | None:
+    """Find the best-scoring catalyst on this ticker within ±3 days.
+
+    Filters:
+      * final_score >= CATALYST_MIN_LINK_SCORE (cheap gate for noise)
+      * tags must not contain "weak", "denies", or "rumor-neg" — these
+        are the keyword classifier's lowered-confidence tags, and
+        linking a position move to a "denies" story would mislead the
+        feedback loop. Fail-open if tags is NULL (ancient rows).
+    """
     row = conn.execute(
         "SELECT id FROM catalysts "
         "WHERE ticker=? "
         "AND date(published_at) IS NOT NULL "
         "AND ABS(julianday(date(published_at)) - julianday(?)) <= ? "
         "AND final_score >= ? "
+        "AND (tags IS NULL OR ("
+        "  tags NOT LIKE '%weak%'"
+        "  AND tags NOT LIKE '%denies%'"
+        "  AND tags NOT LIKE '%rumor-neg%'"
+        "))"
         "ORDER BY final_score DESC LIMIT 1",
         (ticker, event_date_iso, CATALYST_LINK_WINDOW_DAYS, CATALYST_MIN_LINK_SCORE),
     ).fetchone()

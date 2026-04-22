@@ -64,18 +64,29 @@ def _entry_price_map(conn, last_prices: dict) -> dict[str, float]:
     A ticker held in Account A (10 shares @ $100) and Account B (5 shares @ $110)
     has an entry price of (10*100 + 5*110) / 15 = $103.33. Only tickers with at
     least one long position appear in the result.
+
+    Implementation note: uses avg-cost basis at the TRADE level — equivalent to
+    sum(BUY qty*price) / sum(BUY qty) per ticker, ignoring SELL side (SELLs
+    don't change cost basis in avg-cost accounting). This matches what
+    portfolio._positions_from_rows produces but avoids its per-account Python
+    loop. One SQL round-trip for the whole dashboard.
     """
-    import portfolio
-    pos = portfolio.positions_all_accounts(conn, last_prices)
-    if pos.empty:
-        return {}
-    out: dict[str, float] = {}
-    for ticker, g in pos.groupby("ticker"):
-        qty_sum = float(g["qty"].sum())
-        if qty_sum <= 0:
-            continue
-        out[ticker] = float((g["qty"] * g["avg_cost"]).sum() / qty_sum)
-    return out
+    rows = conn.execute(
+        "SELECT ticker, "
+        "  SUM(CASE WHEN side='BUY' THEN qty * price ELSE 0 END) AS buy_cost, "
+        "  SUM(CASE WHEN side='BUY' THEN qty ELSE 0 END) AS buy_qty, "
+        "  SUM(CASE WHEN side='BUY' THEN qty ELSE -qty END) AS net_qty "
+        "FROM trades GROUP BY ticker"
+    ).fetchall()
+    # Only show tickers still held (net_qty > 0). Basis uses BUY-only denominator,
+    # which matches portfolio._positions_from_rows under avg-cost accounting:
+    # a SELL reduces qty + realized P/L but leaves avg_cost unchanged, so the
+    # ratio of cumulative-BUY-cost to cumulative-BUY-qty is the remaining basis.
+    return {
+        r["ticker"]: float(r["buy_cost"] / r["buy_qty"])
+        for r in rows
+        if r["net_qty"] > 1e-9 and r["buy_qty"] > 0
+    }
 
 
 def render() -> None:
