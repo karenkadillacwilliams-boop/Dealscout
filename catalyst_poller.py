@@ -135,7 +135,9 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     fresh = filter_unseen(conn, raw)
     print(f"[poller] {len(fresh)} new after dedup")
 
-    scored = [score.score_item(r) for r in fresh]
+    from catalysts.weight_learner import load_catalyst_tag_multipliers
+    tag_mults = load_catalyst_tag_multipliers(conn)
+    scored = [score.score_item(r, tag_multipliers=tag_mults) for r in fresh]
     pool = [s for s in scored if s.kw_score >= 20]
     rr_map = {id(s): r for s, r in zip(pool, rerank.rerank_batched(pool, batch=10))}
     reranked = [rr_map.get(id(s)) or _to_reranked_kw_only(s) for s in scored]
@@ -223,6 +225,19 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
                 print(f"[poller] detected {n_events} position events (pending review)")
         except Exception as exc:
             print(f"[poller] event detection failed: {exc}")
+
+    # Refresh tag-level learned multipliers from confirmed events (nightly-ish).
+    # Tonight's labels tune tomorrow's scoring.
+    try:
+        from catalysts.weight_learner import (
+            compute_tag_multipliers, persist_tag_multipliers,
+        )
+        mults, stats = compute_tag_multipliers(conn, return_stats=True)
+        persist_tag_multipliers(conn, mults, stats)
+        if mults:
+            print(f"[poller] refreshed weight multipliers: {mults}")
+    except Exception as exc:
+        print(f"[poller] weight learner failed: {exc}")
 
     alerts_sent = 0
     for item, cid in persisted:

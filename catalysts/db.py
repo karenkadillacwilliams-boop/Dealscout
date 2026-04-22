@@ -194,6 +194,14 @@ CREATE TABLE IF NOT EXISTS import_profiles (
   created_at  TEXT    NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tag_multipliers (
+  catalyst_type  TEXT PRIMARY KEY,
+  multiplier     REAL NOT NULL,
+  n_events       INTEGER NOT NULL,
+  hit_rate       REAL NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS import_batches (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -832,3 +840,41 @@ def load_triple_play_fresh(conn: sqlite3.Connection, max_age_hours: int = 24) ->
         (f"-{max_age_hours} hours",),
     ).fetchall()
     return {r["ticker"] for r in rows}
+
+
+def upsert_tag_multiplier(
+    conn: sqlite3.Connection,
+    catalyst_type: str,
+    multiplier: float,
+    n_events: int,
+    hit_rate: float,
+) -> None:
+    conn.execute(
+        "INSERT INTO tag_multipliers(catalyst_type, multiplier, n_events, hit_rate, updated_at) "
+        "VALUES(?,?,?,?,?) "
+        "ON CONFLICT(catalyst_type) DO UPDATE SET "
+        "  multiplier=excluded.multiplier, n_events=excluded.n_events, "
+        "  hit_rate=excluded.hit_rate, updated_at=excluded.updated_at",
+        (catalyst_type, float(multiplier), int(n_events), float(hit_rate), _now()),
+    )
+    conn.commit()
+
+
+def load_tag_multipliers(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Return {catalyst_type: {multiplier, n_events, hit_rate, updated_at}}."""
+    try:
+        rows = conn.execute(
+            "SELECT catalyst_type, multiplier, n_events, hit_rate, updated_at "
+            "FROM tag_multipliers"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        out[r["catalyst_type"]] = {
+            "multiplier": float(r["multiplier"]),
+            "n_events": int(r["n_events"]),
+            "hit_rate": float(r["hit_rate"]),
+            "updated_at": r["updated_at"],
+        }
+    return out
