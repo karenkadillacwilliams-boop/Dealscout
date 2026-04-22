@@ -322,3 +322,19 @@ def render() -> None:
             "| **A** | >= +8 |\n| **B** | >= +3 |\n| **C** | >= -2 |\n"
             "| **D** | >= -7 |\n| **F** | < -7 |"
         )
+
+    with st.expander("Signals legend"):
+        st.markdown(
+            "**Triple** — latest-quarter earnings momentum (EPS beat + revenue beat + "
+            "guidance raise). Point-in-time signal: fades toward 50 over 90 days since "
+            "the report. A 🎯 badge means all three thresholds cleared AND the report "
+            "is fresh (<45 days). Score 0-100.\n\n"
+            "**Tech** — current technical regime (RSI / MACD histogram / price vs 50-day "
+            "SMA). Rolls over with price action.\n\n"
+            "**Catalyst** — the highest-scoring catalyst on this ticker in the last "
+            "24 hours, 0-100.\n\n"
+            "Triple and Catalyst can both light up on an earnings day (the catalyst "
+            "pipeline sees the 8-K; Triple sees the beat magnitude). They're different "
+            "signals over different horizons — Triple keeps its value for weeks, the "
+            "catalyst score decays within a day."
+        )
