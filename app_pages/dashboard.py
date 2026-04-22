@@ -58,9 +58,29 @@ def _opts_badge(conn, ticker: str) -> str:
     return " ".join(parts)
 
 
+def _entry_price_map(conn, last_prices: dict) -> dict[str, float]:
+    """Qty-weighted average cost basis per ticker across all accounts.
+
+    A ticker held in Account A (10 shares @ $100) and Account B (5 shares @ $110)
+    has an entry price of (10*100 + 5*110) / 15 = $103.33. Only tickers with at
+    least one long position appear in the result.
+    """
+    import portfolio
+    pos = portfolio.positions_all_accounts(conn, last_prices)
+    if pos.empty:
+        return {}
+    out: dict[str, float] = {}
+    for ticker, g in pos.groupby("ticker"):
+        qty_sum = float(g["qty"].sum())
+        if qty_sum <= 0:
+            continue
+        out[ticker] = float((g["qty"] * g["avg_cost"]).sum() / qty_sum)
+    return out
+
+
 def render() -> None:
     conn = get_conn()
-    _tickers, _prices, returns_df, _last = price_context()
+    _tickers, _prices, returns_df, last_prices = price_context()
 
     st.title("Dashboard")
     st.caption("Daily / weekly / monthly returns and momentum grade for the watchlist.")
@@ -148,6 +168,10 @@ def render() -> None:
 
     view["triple_play"] = view["ticker"].map(_tp_cell)
 
+    # Entry price (qty-weighted avg cost across all accounts; NaN if not held)
+    entry_map = _entry_price_map(conn, last_prices)
+    view["entry_price"] = view["ticker"].map(entry_map)
+
     view.insert(1, "name", view["ticker"].map(NAMES).fillna(""))
     view = view.rename(columns={
         "ticker": "Ticker", "name": "Name", "last": "Last",
@@ -155,14 +179,16 @@ def render() -> None:
         "monthly_pct": "Monthly %", "ytd_pct": "YTD %",
         "grade": "Grade", "catalyst": "Catalyst",
         "options": "Options", "iv_rank": "IV Rank",
-        "earnings_dte": "Earn DTE", "entry": "Entry",
+        "earnings_dte": "Earn DTE",
+        "entry": "Added",              # date the ticker was added to the universe
+        "entry_price": "Entry",        # qty-weighted avg cost across accounts
         "tech": "Tech", "events": "Events",
         "triple_play": "Triple",
     })
 
-    display_cols = ["Ticker", "Name", "Last", "Daily %", "Weekly %",
+    display_cols = ["Ticker", "Name", "Entry", "Last", "Daily %", "Weekly %",
                     "Monthly %", "YTD %", "Grade", "Triple", "Tech", "Events", "Catalyst",
-                    "Options", "IV Rank", "Earn DTE", "Entry"]
+                    "Options", "IV Rank", "Earn DTE", "Added"]
 
     def _pct_bar(val):
         if pd.isna(val):
@@ -211,21 +237,40 @@ def render() -> None:
             return "color: #dc3545"
         return ""
 
+    def _entry_vs_last_row(row):
+        """Color the Entry cell green if Last > Entry, red if Last < Entry.
+        Uses row-level apply so the comparison reads both columns."""
+        styles = [""] * len(row)
+        if "Entry" not in row.index or "Last" not in row.index:
+            return styles
+        entry = row["Entry"]
+        last = row["Last"]
+        if pd.isna(entry) or pd.isna(last):
+            return styles
+        idx = row.index.get_loc("Entry")
+        if last > entry:
+            styles[idx] = "color: #28a745; font-weight: bold"
+        elif last < entry:
+            styles[idx] = "color: #dc3545; font-weight: bold"
+        return styles
+
     styled = (
         view[display_cols].style
         .format({
+            "Entry": "${:,.2f}",
             "Last": "${:,.2f}",
             "Daily %": "{:+.2f}%", "Weekly %": "{:+.2f}%",
             "Monthly %": "{:+.2f}%", "YTD %": "{:+.2f}%",
             "Catalyst": "{:d}",
             "IV Rank": lambda v: f"{v:.0f}%" if pd.notna(v) else "—",
             "Earn DTE": lambda v: f"{int(v)}d" if pd.notna(v) else "—",
-        })
+        }, na_rep="—")
         .map(_pct_bar, subset=["Daily %", "Weekly %", "Monthly %", "YTD %"])
         .map(_ivr_color, subset=["IV Rank"])
         .map(_dte_color, subset=["Earn DTE"])
         .map(_tech_color, subset=["Tech"])
         .map(_triple_color, subset=["Triple"])
+        .apply(_entry_vs_last_row, axis=1)
     )
     st.dataframe(styled, width="stretch", hide_index=True)
 
