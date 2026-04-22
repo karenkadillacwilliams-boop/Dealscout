@@ -14,7 +14,6 @@ from app_pages import (
     catalysts_page,
     dashboard,
     events,
-    holdings,
     import_trades,
     ipo_tracker,
     options_pulse,
@@ -57,30 +56,34 @@ def _sidebar_header() -> None:
 
 _sidebar_header()
 
-_nav = st.navigation([
-    st.Page(dashboard.render,       title="Dashboard",     icon="📊",
-            url_path="dashboard", default=True),
-    st.Page(catalysts_page.render,  title="Catalysts",     icon="📰",
-            url_path="catalysts"),
-    st.Page(options_pulse.render,   title="Options Pulse", icon="📈",
-            url_path="options-pulse"),
-    st.Page(accounts.render,        title="Accounts",      icon="🏦",
-            url_path="accounts"),
-    st.Page(events.render,          title="Events",        icon="⚡",
-            url_path="events"),
-    st.Page(import_trades.render,   title="Import",        icon="⬆",
-            url_path="import"),
-    st.Page(power_gauge.render,     title="Power Gauge",   icon="⚡",
-            url_path="power-gauge"),
-    st.Page(holdings.render,        title="Holdings",      icon="💼",
-            url_path="holdings"),
-    st.Page(trades.render,          title="Trades",        icon="🧾",
-            url_path="trades"),
-    st.Page(performance.render,     title="Performance",   icon="📉",
-            url_path="performance"),
-    st.Page(ipo_tracker.render,     title="IPO Tracker",   icon="🆕",
-            url_path="ipo-tracker"),
-    st.Page(universe.render,        title="Universe",      icon="🌐",
-            url_path="universe"),
-])
+_nav = st.navigation({
+    "Signals": [
+        st.Page(dashboard.render,       title="Dashboard",     icon="📊",
+                url_path="dashboard", default=True),
+        st.Page(catalysts_page.render,  title="Catalysts",     icon="📰",
+                url_path="catalysts"),
+        st.Page(options_pulse.render,   title="Options Pulse", icon="📈",
+                url_path="options-pulse"),
+        st.Page(power_gauge.render,     title="Power Gauge",   icon="⚡",
+                url_path="power-gauge"),
+        st.Page(ipo_tracker.render,     title="IPO Tracker",   icon="🆕",
+                url_path="ipo-tracker"),
+    ],
+    "Portfolio": [
+        st.Page(accounts.render,        title="Accounts",      icon="🏦",
+                url_path="accounts"),
+        st.Page(events.render,          title="Events",        icon="⚡",
+                url_path="events"),
+        st.Page(import_trades.render,   title="Import",        icon="⬆",
+                url_path="import"),
+        st.Page(trades.render,          title="Trades",        icon="🧾",
+                url_path="trades"),
+        st.Page(performance.render,     title="Performance",   icon="📉",
+                url_path="performance"),
+    ],
+    "Admin": [
+        st.Page(universe.render,        title="Universe",      icon="🌐",
+                url_path="universe"),
+    ],
+})
 _nav.run()
