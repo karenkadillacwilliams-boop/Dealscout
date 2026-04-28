@@ -1,7 +1,15 @@
-"""SQLite connection, migrations, and typed CRUD for Catalyst Radar."""
+"""SQLite connection, migrations, and typed CRUD for Catalyst Radar.
+
+Connection backend: defaults to stdlib sqlite3 against a local file. If the
+env vars TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are set (Streamlit Cloud /
+GitHub Actions), connect() returns a libsql embedded-replica connection —
+local file kept in sync with remote Turso. The rest of this module sees a
+sqlite3-compatible Connection either way (Row factory, executescript, etc.).
+"""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -221,6 +229,18 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     # check_same_thread=False lets Streamlit reuse a cached connection across
     # its per-rerun worker threads. Safe: SQLite (threadsafe=1 build) serialises
     # statements with its own mutex, and WAL permits concurrent readers.
+    sync_url = os.environ.get("TURSO_DATABASE_URL")
+    auth_token = os.environ.get("TURSO_AUTH_TOKEN")
+    if sync_url and auth_token:
+        import libsql_experimental as libsql  # type: ignore[import-not-found]
+        conn = libsql.connect(
+            str(path), sync_url=sync_url, auth_token=auth_token,
+        )
+        conn.sync()
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

@@ -9,6 +9,10 @@ import streamlit as st
 
 st.set_page_config(page_title="Dealscout", page_icon="📈", layout="wide")
 
+from app_pages._boot import hydrate_env_from_secrets
+
+hydrate_env_from_secrets()
+
 from app_pages import (
     accounts,
     catalysts_page,

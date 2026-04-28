@@ -60,7 +60,29 @@
       "Bash(.venv/Scripts/python -m pytest tests/test_power_gauge.py -q --tb=short)",
       "Bash(.venv/Scripts/python -c \"import app_pages.accounts; print\\('ok'\\)\")",
       "Bash(.venv/Scripts/python -c \"import portfolio; print\\(hasattr\\(portfolio, 'positions_all_accounts'\\)\\)\")",
-      "Bash(.venv/Scripts/python -c \"from app_pages import ipo_tracker; print\\('ok'\\)\")"
+      "Bash(.venv/Scripts/python -c \"from app_pages import ipo_tracker; print\\('ok'\\)\")",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe -m pip install libsql-experimental)",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe -m pip install libsql)",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe --version)",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe -m pip index versions libsql-experimental)",
+      "Bash(C:/Users/mwill/AppData/Local/Programs/Python/Python311/python.exe *)",
+      "Bash(\"C:/Users/mwill/AppData/Local/Programs/Python/Python311/python.exe\" -m venv \"C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv311\")",
+      "Bash(\"C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv311/Scripts/python.exe\" -m pip install --upgrade pip)",
+      "Bash(\"C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv311/Scripts/python.exe\" -m pip install libsql-experimental)",
+      "Bash(\"C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv311/Scripts/python.exe\" -m pip download libsql-experimental --no-deps -d /tmp/wheel-check)",
+      "Bash(command -v scoop)",
+      "Bash(command -v winget)",
+      "Bash(command -v turso)",
+      "Bash(command -v wsl)",
+      "Bash(wsl --status)",
+      "Bash(wsl --list --verbose)",
+      "Bash(\"C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv311/Scripts/python.exe\" -m pip download libsql-experimental --no-deps --platform manylinux_2_17_x86_64 --python-version 3.11 --implementation cp --abi cp311 --only-binary=:all: -d /tmp/wheel-check-linux)",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe -c \"import ast; ast.parse\\(open\\('scripts/migrate_to_turso.py'\\).read\\(\\)\\); print\\('OK: script parses'\\)\")",
+      "Bash(unset TURSO_DATABASE_URL TURSO_AUTH_TOKEN)",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe scripts/migrate_to_turso.py)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe -c ' *)",
+      "Bash(C:/Users/mwill/OneDrive/Documents/mwilliams2733/Dealscout/.venv/Scripts/python.exe *)"
     ]
   }
 }
