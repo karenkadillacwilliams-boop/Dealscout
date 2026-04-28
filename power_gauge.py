@@ -256,7 +256,31 @@ def _earnings_growth_fallback(f: dict) -> dict:
 def score_earnings_surprises(f: dict) -> dict:
     hist = f.get("earningsHistory") or []
     if not hist:
-        return {"score": 50, "detail": "no earnings history"}
+        # No EPS history — but revenue/guidance inputs from the triple-play
+        # pipeline may still carry signal, so honour them if present before
+        # returning neutral.
+        rev_surp = f.get("revenueSurprisePct")
+        gdelta = f.get("bullishShareDelta")
+        if rev_surp is None and gdelta is None:
+            return {"score": 50, "detail": "no earnings history"}
+        score = 50
+        extras: list[str] = []
+        if rev_surp is not None:
+            if   rev_surp > 10: score += 15
+            elif rev_surp > 5:  score += 10
+            elif rev_surp > 2:  score += 5
+            elif rev_surp < -5: score -= 8
+            extras.append(f"rev {rev_surp:+.1f}%")
+        if gdelta is not None:
+            if   gdelta > 5:  score += 10
+            elif gdelta > 2:  score += 6
+            elif gdelta < -2: score -= 6
+            extras.append(f"gdn {gdelta:+.1f}pp")
+        detail = "no EPS history"
+        if extras:
+            detail += f" ({', '.join(extras)})"
+        return {"score": clamp(score), "detail": detail}
+
     score = 50
     streak = 0
     for q in hist:
@@ -281,7 +305,32 @@ def score_earnings_surprises(f: dict) -> dict:
         if sp is not None and sp < -5:
             score -= 8
 
-    return {"score": clamp(score), "detail": f"{streak}-qtr beat streak, avg surprise {avg_sur:.1f}%"}
+    # Revenue surprise booster (additive). Triple-play pipeline supplies this
+    # via yfinance earnings_history; may be absent when data is thin.
+    rev_surp = f.get("revenueSurprisePct")
+    if rev_surp is not None:
+        if   rev_surp > 10: score += 15
+        elif rev_surp > 5:  score += 10
+        elif rev_surp > 2:  score += 5
+        elif rev_surp < -5: score -= 8
+
+    # Guidance / analyst momentum delta: (strongBuy+buy share) after earnings
+    # minus before, in percentage points. Sourced via triple-play pipeline.
+    gdelta = f.get("bullishShareDelta")
+    if gdelta is not None:
+        if   gdelta > 5:  score += 10
+        elif gdelta > 2:  score += 6
+        elif gdelta < -2: score -= 6
+
+    extras: list[str] = []
+    if rev_surp is not None:
+        extras.append(f"rev {rev_surp:+.1f}%")
+    if gdelta is not None:
+        extras.append(f"gdn {gdelta:+.1f}pp")
+    detail = f"{streak}-qtr beat streak, avg surprise {avg_sur:.1f}%"
+    if extras:
+        detail += f" ({', '.join(extras)})"
+    return {"score": clamp(score), "detail": detail}
 
 
 def score_earnings_trend(f: dict) -> dict:

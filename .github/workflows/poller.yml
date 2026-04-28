@@ -1,0 +1,51 @@
+name: Catalyst Poller
+
+on:
+  schedule:
+    # Every 15 min during US market hours (Mon-Fri 09:00-21:00 UTC ~ 04:00-16:00 ET).
+    # GitHub cron has ~5-10 min jitter; this is intentional.
+    - cron: "*/15 13-21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force_alert:
+        description: "Send alerts even if dedup window says no"
+        type: boolean
+        default: false
+
+concurrency:
+  group: poller
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14  # one minute under cron interval
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run poller
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MAX_RERANK_CALLS_PER_DAY: ${{ secrets.MAX_RERANK_CALLS_PER_DAY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PW: ${{ secrets.GMAIL_APP_PW }}
+          ALERT_TO_EMAIL: ${{ secrets.ALERT_TO_EMAIL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          FORCE_ALERT: ${{ inputs.force_alert }}
+        run: |
+          if [ "$FORCE_ALERT" = "true" ]; then
+            python catalyst_poller.py --force-alert
+          else
+            python catalyst_poller.py
+          fi

@@ -68,15 +68,22 @@ def _is_high_signal_form(form_type: str | None) -> bool:
     return any(form_type.startswith(p) for p in _FILING_FORM_PREFIXES)
 
 
-def score_item(raw: RawCatalyst) -> ScoredItem:
+def score_item(
+    raw: RawCatalyst,
+    tag_multipliers: dict[str, float] | None = None,
+) -> ScoredItem:
+    """Score a raw catalyst; `tag_multipliers` is the learned {tag: multiplier}
+    produced by weight_learner. When None, behavior is unchanged."""
     text = raw.headline
     tags: list[str] = []
     matched: list[str] = []
-    total = 0
+    total = 0.0
+
+    mults = tag_multipliers or {}
 
     for pattern, weight, tag, phrase in _COMPILED:
         if pattern.search(text):
-            total += weight
+            total += weight * mults.get(tag, 1.0)
             matched.append(phrase)
             if tag not in tags:
                 tags.append(tag)
@@ -86,22 +93,24 @@ def score_item(raw: RawCatalyst) -> ScoredItem:
     # suffix for amendments (passive position adjustments — discount).
     ft = raw.form_type or ""
     if ft.startswith("SCHEDULE 13D"):
-        total += 15 if ft.endswith("/A") else 25
+        base = 15 if ft.endswith("/A") else 25
+        total += base * mults.get("activist", 1.0)
         if "activist" not in tags:
             tags.append("activist")
     elif ft.startswith("SCHEDULE 13G"):
-        total += 5 if ft.endswith("/A") else 15
+        base = 5 if ft.endswith("/A") else 15
+        total += base * mults.get("activist", 1.0)
         if "activist" not in tags:
             tags.append("activist")
 
     # Strong M&A signal in an M&A-relevant form → filing bonus and tag.
     has_ma_tag = any(t.startswith("m&a") or t == "activist" for t in tags)
     if _is_high_signal_form(raw.form_type) and has_ma_tag:
-        total += _FILING_BONUS
+        total += _FILING_BONUS * mults.get("filing", 1.0)
         if "filing" not in tags:
             tags.append("filing")
 
-    kw = max(0, min(100, total))
+    kw = max(0, min(100, int(round(total))))
     return ScoredItem(
         raw=raw,
         kw_score=kw,

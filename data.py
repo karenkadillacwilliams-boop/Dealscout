@@ -180,6 +180,20 @@ def fetch_fundamentals(ticker: str) -> dict:
     except Exception:
         pass
 
+    # Revenue surprise + guidance/analyst-momentum delta from the triple-play
+    # pipeline (Finnhub + yfinance). Both degrade to None when the data
+    # source is unavailable; the scorer already handles None cleanly.
+    revenue_surprise_pct: float | None = None
+    bullish_share_delta: float | None = None
+    try:
+        from catalysts.earnings import get_earnings_data  # function-scope to avoid circular import
+        edata = get_earnings_data(ticker)
+        if edata is not None:
+            revenue_surprise_pct = edata.revenue_surprise_pct
+            bullish_share_delta = edata.bullish_share_delta
+    except Exception:
+        pass
+
     return {
         "symbol": ticker,
         "sector": info.get("sector"),
@@ -196,6 +210,8 @@ def fetch_fundamentals(ticker: str) -> dict:
         "recommendationMean": info.get("recommendationMean"),
         "recommendationKey": info.get("recommendationKey"),
         "earningsHistory": earnings_history,
+        "revenueSurprisePct": revenue_surprise_pct,
+        "bullishShareDelta": bullish_share_delta,
     }
 
 

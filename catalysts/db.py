@@ -1,7 +1,15 @@
-"""SQLite connection, migrations, and typed CRUD for Catalyst Radar."""
+"""SQLite connection, migrations, and typed CRUD for Catalyst Radar.
+
+Connection backend: defaults to stdlib sqlite3 against a local file. If the
+env vars TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are set (Streamlit Cloud /
+GitHub Actions), connect() returns a libsql embedded-replica connection —
+local file kept in sync with remote Turso. The rest of this module sees a
+sqlite3-compatible Connection either way (Row factory, executescript, etc.).
+"""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -120,6 +128,18 @@ CREATE TABLE IF NOT EXISTS related_tickers (
     PRIMARY KEY (ticker)
 );
 
+CREATE TABLE IF NOT EXISTS triple_play (
+  ticker             TEXT PRIMARY KEY,
+  score              REAL NOT NULL,
+  eps_surprise_pct   REAL,
+  revenue_surprise_pct REAL,
+  bullish_share_delta  REAL,
+  days_since_report  INTEGER,
+  is_full_triple_play INTEGER NOT NULL DEFAULT 0,
+  report_period      TEXT,
+  updated_at         TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT    NOT NULL UNIQUE,
@@ -182,6 +202,14 @@ CREATE TABLE IF NOT EXISTS import_profiles (
   created_at  TEXT    NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tag_multipliers (
+  catalyst_type  TEXT PRIMARY KEY,
+  multiplier     REAL NOT NULL,
+  n_events       INTEGER NOT NULL,
+  hit_rate       REAL NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS import_batches (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -201,6 +229,18 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     # check_same_thread=False lets Streamlit reuse a cached connection across
     # its per-rerun worker threads. Safe: SQLite (threadsafe=1 build) serialises
     # statements with its own mutex, and WAL permits concurrent readers.
+    sync_url = os.environ.get("TURSO_DATABASE_URL")
+    auth_token = os.environ.get("TURSO_AUTH_TOKEN")
+    if sync_url and auth_token:
+        import libsql_experimental as libsql  # type: ignore[import-not-found]
+        conn = libsql.connect(
+            str(path), sync_url=sync_url, auth_token=auth_token,
+        )
+        conn.sync()
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -770,3 +810,91 @@ def load_import_batches(
     q += " ORDER BY imported_at DESC LIMIT ?"
     params.append(limit)
     return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def upsert_triple_play(
+    conn: sqlite3.Connection,
+    ticker: str,
+    score: float,
+    eps: float | None,
+    revenue: float | None,
+    guidance_delta: float | None,
+    days: int,
+    is_full: bool,
+    report_period: str | None,
+) -> None:
+    conn.execute(
+        """INSERT INTO triple_play
+           (ticker, score, eps_surprise_pct, revenue_surprise_pct,
+            bullish_share_delta, days_since_report, is_full_triple_play,
+            report_period, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(ticker) DO UPDATE SET
+              score=excluded.score,
+              eps_surprise_pct=excluded.eps_surprise_pct,
+              revenue_surprise_pct=excluded.revenue_surprise_pct,
+              bullish_share_delta=excluded.bullish_share_delta,
+              days_since_report=excluded.days_since_report,
+              is_full_triple_play=excluded.is_full_triple_play,
+              report_period=excluded.report_period,
+              updated_at=excluded.updated_at""",
+        (
+            ticker.upper(), score, eps, revenue, guidance_delta,
+            days, 1 if is_full else 0, report_period, _now(),
+        ),
+    )
+    conn.commit()
+
+
+def load_triple_play(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Return {ticker: row_dict} for all rows."""
+    rows = conn.execute("SELECT * FROM triple_play").fetchall()
+    return {r["ticker"]: dict(r) for r in rows}
+
+
+def load_triple_play_fresh(conn: sqlite3.Connection, max_age_hours: int = 24) -> set[str]:
+    """Return set of tickers whose updated_at is within max_age_hours."""
+    rows = conn.execute(
+        "SELECT ticker FROM triple_play "
+        "WHERE datetime(updated_at) >= datetime('now', ?)",
+        (f"-{max_age_hours} hours",),
+    ).fetchall()
+    return {r["ticker"] for r in rows}
+
+
+def upsert_tag_multiplier(
+    conn: sqlite3.Connection,
+    catalyst_type: str,
+    multiplier: float,
+    n_events: int,
+    hit_rate: float,
+) -> None:
+    conn.execute(
+        "INSERT INTO tag_multipliers(catalyst_type, multiplier, n_events, hit_rate, updated_at) "
+        "VALUES(?,?,?,?,?) "
+        "ON CONFLICT(catalyst_type) DO UPDATE SET "
+        "  multiplier=excluded.multiplier, n_events=excluded.n_events, "
+        "  hit_rate=excluded.hit_rate, updated_at=excluded.updated_at",
+        (catalyst_type, float(multiplier), int(n_events), float(hit_rate), _now()),
+    )
+    conn.commit()
+
+
+def load_tag_multipliers(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Return {catalyst_type: {multiplier, n_events, hit_rate, updated_at}}."""
+    try:
+        rows = conn.execute(
+            "SELECT catalyst_type, multiplier, n_events, hit_rate, updated_at "
+            "FROM tag_multipliers"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        out[r["catalyst_type"]] = {
+            "multiplier": float(r["multiplier"]),
+            "n_events": int(r["n_events"]),
+            "hit_rate": float(r["hit_rate"]),
+            "updated_at": r["updated_at"],
+        }
+    return out

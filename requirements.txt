@@ -9,3 +9,4 @@ feedparser>=6.0.10
 defusedxml>=0.7.1
 anthropic>=0.39.0
 pytest>=8.0.0
+libsql-experimental>=0.0.41

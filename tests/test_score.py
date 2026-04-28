@@ -45,3 +45,19 @@ def test_score_is_bounded_0_100():
         "8-K"
     ))
     assert 0 <= item.kw_score <= 100
+
+
+def test_tag_multipliers_boost_score():
+    """Learned multipliers > 1.0 raise the score of a matching tag."""
+    raw = _raw("Company enters definitive agreement to acquire rival", None)
+    base = score_item(raw)
+    boosted = score_item(raw, tag_multipliers={"m&a-confirmed": 1.30})
+    assert boosted.kw_score > base.kw_score
+
+
+def test_tag_multipliers_none_preserves_behavior():
+    """tag_multipliers=None is identical to not passing the argument."""
+    raw = _raw("Company enters definitive agreement to acquire rival", None)
+    a = score_item(raw)
+    b = score_item(raw, tag_multipliers=None)
+    assert a.kw_score == b.kw_score

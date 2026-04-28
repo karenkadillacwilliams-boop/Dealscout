@@ -135,7 +135,9 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     fresh = filter_unseen(conn, raw)
     print(f"[poller] {len(fresh)} new after dedup")
 
-    scored = [score.score_item(r) for r in fresh]
+    from catalysts.weight_learner import load_catalyst_tag_multipliers
+    tag_mults = load_catalyst_tag_multipliers(conn)
+    scored = [score.score_item(r, tag_multipliers=tag_mults) for r in fresh]
     pool = [s for s in scored if s.kw_score >= 20]
     rr_map = {id(s): r for s, r in zip(pool, rerank.rerank_batched(pool, batch=10))}
     reranked = [rr_map.get(id(s)) or _to_reranked_kw_only(s) for s in scored]
@@ -148,12 +150,20 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         ], indent=2))
         return 0
 
+    # Initialize run-level counters so the end-of-run diagnostic print is always
+    # correct even when a phase is skipped or fails.
+    n_filled = 0
+    n_events = 0
+
     alert_tickers = set()
     persisted: list[tuple[RerankedItem, int]] = []
     for item in reranked:
         cid = cdb.persist_catalyst(conn, item)
         persisted.append((item, cid))
-        if item.final_score >= 70 and item.llm_score is not None:
+        # Alert gate: either LLM-reranked (llm_score set) OR a very strong
+        # keyword-only score. This prevents silent suppression of high-signal
+        # filings when the daily rerank cap is exhausted.
+        if item.final_score >= 70 and (item.llm_score is not None or item.kw_score >= 85):
             alert_tickers.add(item.ticker)
 
     # Backfill IV history for new tickers
@@ -181,6 +191,31 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         except Exception as exc:
             print(f"[poller] technicals failed: {exc}")
 
+    # Triple-play (post-earnings fundamental momentum) — Finnhub + yfinance
+    if os.environ.get("FINNHUB_API_KEY"):
+        from catalysts.earnings import get_earnings_data
+        from catalysts.triple_play import score_triple_play
+        try:
+            fresh = cdb.load_triple_play_fresh(conn, max_age_hours=24)
+            stale_tickers = [t for t in tickers if t not in fresh]
+            tp_count = 0
+            for t in stale_tickers:
+                data = get_earnings_data(t)
+                score_tp = score_triple_play(data)
+                cdb.upsert_triple_play(
+                    conn, ticker=t, score=score_tp.score,
+                    eps=score_tp.eps_component, revenue=score_tp.revenue_component,
+                    guidance_delta=score_tp.guidance_component,
+                    days=score_tp.days_since_report,
+                    is_full=score_tp.is_full_triple_play,
+                    report_period=score_tp.report_period,
+                )
+                tp_count += 1
+            if tp_count:
+                print(f"[poller] triple-play scored {tp_count} tickers ({len(fresh)} fresh)")
+        except Exception as exc:
+            print(f"[poller] triple-play failed: {exc}")
+
     # Position event detection (portfolios)
     if os.environ.get("POLYGON_API_KEY"):
         try:
@@ -191,10 +226,24 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         except Exception as exc:
             print(f"[poller] event detection failed: {exc}")
 
+    # Refresh tag-level learned multipliers from confirmed events (nightly-ish).
+    # Tonight's labels tune tomorrow's scoring.
+    try:
+        from catalysts.weight_learner import (
+            compute_tag_multipliers, persist_tag_multipliers,
+        )
+        mults, stats = compute_tag_multipliers(conn, return_stats=True)
+        persist_tag_multipliers(conn, mults, stats)
+        if mults:
+            print(f"[poller] refreshed weight multipliers: {mults}")
+    except Exception as exc:
+        print(f"[poller] weight learner failed: {exc}")
+
     alerts_sent = 0
     for item, cid in persisted:
         should_alert = force_alert or (
-            item.final_score >= 70 and item.llm_score is not None
+            item.final_score >= 70
+            and (item.llm_score is not None or item.kw_score >= 85)
         )
         if not should_alert:
             continue
@@ -217,10 +266,10 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
 
     # Aggregate visibility — approx Polygon calls per run (for rate-budget tuning)
     approx_polygon_calls = (
-        len(tickers)                                         # options chains (1/ticker)
-        + len(tickers) * 3                                   # technicals (3/ticker)
-        + (n_filled if 'n_filled' in dir() else 0)           # iv backfill
-        + (n_events if 'n_events' in dir() else 0)           # detector bars (~1/unique held ticker)
+        len(tickers)                      # options chains (1/ticker)
+        + len(tickers) * 3                # technicals (3/ticker)
+        + n_filled                        # iv backfill (initialized to 0 above)
+        + n_events                        # detector bars (initialized to 0 above)
     )
     print(f"[poller] approx polygon calls this run: {approx_polygon_calls}")
     print(f"[poller] persisted {len(reranked)} catalysts, {alerts_sent} alerts sent")
