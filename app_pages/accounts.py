@@ -137,6 +137,7 @@ def _render_all_accounts(conn, last_prices: dict) -> None:
     Events timeline is skipped in this view — it only makes sense per-account.
     """
     pos = portfolio.positions_all_accounts(conn, last_prices)
+    _warn_unmatched_sells(pos)
     if pos.empty:
         st.info("No positions across any account yet. Record a buy on Trades "
                 "or upload via Import.")
@@ -184,8 +185,28 @@ def _render_all_accounts(conn, last_prices: dict) -> None:
         st.plotly_chart(fig, width="stretch")
 
 
+def _warn_unmatched_sells(df) -> None:
+    """Say so when sells were excluded for lack of a matching buy.
+
+    Without this the omission is invisible and realized P/L simply reads low.
+    """
+    unmatched = df.attrs.get(portfolio.UNMATCHED_SELLS_ATTR) or {}
+    if not unmatched:
+        return
+    detail = ", ".join(f"{tk} ({qty:,.4g})" for tk, qty in sorted(unmatched.items()))
+    st.warning(
+        f"⚠️ Realized P/L excludes {len(unmatched)} "
+        f"ticker{'s' if len(unmatched) != 1 else ''} with sells that have no "
+        f"matching buy on record: {detail}. There is no cost basis to compute "
+        f"against, so those gains are missing from the totals below. Usually "
+        f"this means the purchase predates your imported history — add the "
+        f"opening trade to correct it."
+    )
+
+
 def _render_drilldown(conn, account_id: int, last_prices: dict) -> None:
     df = portfolio.positions_for_account(conn, account_id, last_prices)
+    _warn_unmatched_sells(df)
     if df.empty:
         st.info("No positions in this account yet. Use Import or Trades to add some.")
     else:

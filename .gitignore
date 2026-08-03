@@ -12,3 +12,6 @@ venv/
 *.db-shm
 .pytest_cache/
 .rerank_counter.json
+# Per-machine Claude Code permissions — holds absolute local paths.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

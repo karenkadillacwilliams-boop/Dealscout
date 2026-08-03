@@ -32,9 +32,31 @@ def _to_reranked_kw_only(s: ScoredItem) -> RerankedItem:
     )
 
 
-def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
+def should_alert(item: RerankedItem) -> bool:
+    """Whether an item clears the alert bar.
+
+    Either LLM-reranked, or a keyword score strong enough to stand on its own.
+    The kw_score fallback prevents silent suppression of high-signal filings on
+    days when the rerank budget is already spent.
+
+    Single source of truth: run_once() consults this both when collecting
+    alert_tickers and when actually dispatching. Those were previously two
+    hand-copied expressions that had to be kept identical by hand.
+    """
+    return item.final_score >= 70 and (
+        item.llm_score is not None or item.kw_score >= 85
+    )
+
+
+def _fetch_options(conn, tickers: list[str]) -> tuple[dict[str, str], int]:
+    """Returns (per-ticker summary text, number of Polygon chain calls made).
+
+    The call count is reported rather than inferred so the end-of-run budget
+    line reflects what actually happened — this phase is skipped entirely when
+    the market is closed or no API key is set.
+    """
     if not os.environ.get("POLYGON_API_KEY"):
-        return {}
+        return {}, 0
 
     # Polygon's /v3/snapshot/options returns IV+greeks 24/7 but last_quote,
     # day, and last_trade are all null outside regular market hours +
@@ -43,7 +65,7 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     # in the DB (clear_stale_options only runs when we actually fetch).
     if not is_market_open():
         log.info("market closed, skipping options fetch")
-        return {}
+        return {}, 0
 
     now_str = datetime.now(timezone.utc).isoformat(timespec="seconds")
     summaries: dict[str, str] = {}
@@ -51,8 +73,9 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
     cdb.clear_stale_options(conn)
 
     all_contracts = options.fetch_chains_batch(tickers)
+    n_chain_calls = len(tickers)  # fetch_chains_batch issues one call per ticker
     if not all_contracts:
-        return {}
+        return {}, n_chain_calls
 
     from catalysts.uoa import detect_unusual
     uoa_signals = detect_unusual(all_contracts)
@@ -110,7 +133,7 @@ def _fetch_options(conn, tickers: list[str]) -> dict[str, str]:
             )
 
     cdb.prune_iv_history(conn)
-    return summaries
+    return summaries, n_chain_calls
 
 
 def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
@@ -150,9 +173,10 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         ], indent=2))
         return 0
 
-    # Initialize run-level counters so the end-of-run diagnostic print is always
-    # correct even when a phase is skipped or fails.
-    n_filled = 0
+    # Accumulated as each phase actually runs, so the end-of-run budget line
+    # stays honest when a phase is skipped (market closed, missing key) or
+    # raises partway through.
+    polygon_calls = 0
     n_events = 0
 
     alert_tickers = set()
@@ -160,10 +184,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
     for item in reranked:
         cid = cdb.persist_catalyst(conn, item)
         persisted.append((item, cid))
-        # Alert gate: either LLM-reranked (llm_score set) OR a very strong
-        # keyword-only score. This prevents silent suppression of high-signal
-        # filings when the daily rerank cap is exhausted.
-        if item.final_score >= 70 and (item.llm_score is not None or item.kw_score >= 85):
+        if should_alert(item):
             alert_tickers.add(item.ticker)
 
     # Backfill IV history for new tickers
@@ -171,12 +192,14 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         from catalysts.iv_rank import backfill_batch
         try:
             n_filled = backfill_batch(tickers, conn)
+            polygon_calls += n_filled
             if n_filled:
                 print(f"[poller] backfilled IV history for {n_filled} tickers")
         except Exception as exc:
             print(f"[poller] IV backfill failed: {exc}")
 
-    options_summaries = _fetch_options(conn, tickers)
+    options_summaries, n_chain_calls = _fetch_options(conn, tickers)
+    polygon_calls += n_chain_calls
     print(f"[poller] options summaries for {len(options_summaries)} tickers")
 
     # Technical confluence scoring
@@ -184,6 +207,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         from catalysts.technicals import fetch_technicals_batch
         try:
             tech_map = fetch_technicals_batch(tickers, prices=None)
+            polygon_calls += len(tickers) * 3  # rsi + macd + sma per ticker
             for t, sig in tech_map.items():
                 cdb.upsert_technical(conn, t, sig.rsi, sig.macd_histogram,
                                      sig.price_vs_sma50, sig.label, sig.score)
@@ -196,8 +220,10 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         from catalysts.earnings import get_earnings_data
         from catalysts.triple_play import score_triple_play
         try:
-            fresh = cdb.load_triple_play_fresh(conn, max_age_hours=24)
-            stale_tickers = [t for t in tickers if t not in fresh]
+            # Not `fresh` — that name already holds this run's deduped
+            # catalysts higher up in run_once().
+            fresh_tp = cdb.load_triple_play_fresh(conn, max_age_hours=24)
+            stale_tickers = [t for t in tickers if t not in fresh_tp]
             tp_count = 0
             for t in stale_tickers:
                 data = get_earnings_data(t)
@@ -212,7 +238,8 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
                 )
                 tp_count += 1
             if tp_count:
-                print(f"[poller] triple-play scored {tp_count} tickers ({len(fresh)} fresh)")
+                print(f"[poller] triple-play scored {tp_count} tickers "
+                      f"({len(fresh_tp)} already fresh)")
         except Exception as exc:
             print(f"[poller] triple-play failed: {exc}")
 
@@ -221,6 +248,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         try:
             from portfolios.events import detect_events_for_all_accounts
             n_events = detect_events_for_all_accounts(conn)
+            polygon_calls += n_events  # one bar lookup per detected event
             if n_events:
                 print(f"[poller] detected {n_events} position events (pending review)")
         except Exception as exc:
@@ -241,11 +269,7 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
 
     alerts_sent = 0
     for item, cid in persisted:
-        should_alert = force_alert or (
-            item.final_score >= 70
-            and (item.llm_score is not None or item.kw_score >= 85)
-        )
-        if not should_alert:
+        if not (force_alert or should_alert(item)):
             continue
         bucket = item.final_score // 10
         if recently_alerted(conn, item.ticker, bucket, hours=6):
@@ -264,14 +288,8 @@ def run_once(dry_run: bool = False, force_alert: bool = False) -> int:
         conn.commit()
         alerts_sent += 1
 
-    # Aggregate visibility — approx Polygon calls per run (for rate-budget tuning)
-    approx_polygon_calls = (
-        len(tickers)                      # options chains (1/ticker)
-        + len(tickers) * 3                # technicals (3/ticker)
-        + n_filled                        # iv backfill (initialized to 0 above)
-        + n_events                        # detector bars (initialized to 0 above)
-    )
-    print(f"[poller] approx polygon calls this run: {approx_polygon_calls}")
+    # Aggregate visibility for rate-budget tuning. Counts only phases that ran.
+    print(f"[poller] approx polygon calls this run: {polygon_calls}")
     print(f"[poller] persisted {len(reranked)} catalysts, {alerts_sent} alerts sent")
     return 0
 

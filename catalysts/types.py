@@ -40,3 +40,5 @@ class RerankedItem:
     def published_at(self) -> str: return self.scored.raw.published_at
     @property
     def tags(self) -> tuple[str, ...]: return self.scored.tags
+    @property
+    def kw_score(self) -> int: return self.scored.kw_score

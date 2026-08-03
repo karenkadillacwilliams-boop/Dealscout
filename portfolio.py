@@ -19,6 +19,14 @@ _POSITION_COLS = [
     "market_value", "unrealized_pl", "realized_pl", "total_pl",
 ]
 
+#: DataFrame.attrs key holding {ticker: qty} for sells that had no open lot to
+#: close against. Such trades cannot contribute realized P/L — there is no cost
+#: basis to subtract — so they are excluded from the maths. Callers should
+#: surface this rather than let the omission pass unnoticed; the usual cause is
+#: a broker CSV whose window starts after the original purchase, which makes
+#: reported realized gains look smaller than they really were.
+UNMATCHED_SELLS_ATTR = "unmatched_sells"
+
 
 def _positions_from_rows(
     trade_rows: list[dict],
@@ -30,6 +38,7 @@ def _positions_from_rows(
     qty_by: dict[str, float] = defaultdict(float)
     cost_by: dict[str, float] = defaultdict(float)
     realized_by: dict[str, float] = defaultdict(float)
+    unmatched_by: dict[str, float] = defaultdict(float)
 
     for t in rows_sorted:
         tk = t["ticker"]
@@ -38,6 +47,10 @@ def _positions_from_rows(
             qty_by[tk] += t["qty"]
         else:  # SELL
             if qty_by[tk] <= 0:
+                # Nothing open to close against, so there is no cost basis and
+                # no derivable realized P/L. Record the shortfall so the caller
+                # can flag it — see UNMATCHED_SELLS_ATTR.
+                unmatched_by[tk] += t["qty"]
                 continue
             avg_cost = cost_by[tk] / qty_by[tk]
             sell_qty = min(t["qty"], qty_by[tk])
@@ -63,9 +76,14 @@ def _positions_from_rows(
             "realized_pl": realized_by[tk],
             "total_pl": unrealized + realized_by[tk],
         })
+    unmatched = {k: v for k, v in unmatched_by.items() if v > 0}
     if not rows:
-        return pd.DataFrame(columns=_POSITION_COLS)
-    return pd.DataFrame(rows).sort_values("market_value", ascending=False)
+        empty = pd.DataFrame(columns=_POSITION_COLS)
+        empty.attrs[UNMATCHED_SELLS_ATTR] = unmatched
+        return empty
+    df = pd.DataFrame(rows).sort_values("market_value", ascending=False)
+    df.attrs[UNMATCHED_SELLS_ATTR] = unmatched
+    return df
 
 
 def positions_for_account(
@@ -84,8 +102,13 @@ def positions_all_accounts(
     """One row per (account, ticker) — allows per-account attribution."""
     accounts = {a["id"]: a["name"] for a in cdb.load_accounts(conn)}
     frames: list[pd.DataFrame] = []
+    # Summed across accounts; pd.concat does not carry .attrs through, so this
+    # is rebuilt explicitly rather than inherited from the first frame.
+    unmatched: dict[str, float] = {}
     for acc_id, acc_name in accounts.items():
         df = positions_for_account(conn, acc_id, last_prices)
+        for tk, qty in df.attrs.get(UNMATCHED_SELLS_ATTR, {}).items():
+            unmatched[tk] = unmatched.get(tk, 0.0) + qty
         if df.empty:
             continue
         df = df.copy()
@@ -94,8 +117,11 @@ def positions_all_accounts(
         frames.append(df)
     if not frames:
         cols = ["account_id", "account_name"] + _POSITION_COLS
-        return pd.DataFrame(columns=cols)
-    return pd.concat(frames, ignore_index=True)
+        out = pd.DataFrame(columns=cols)
+    else:
+        out = pd.concat(frames, ignore_index=True)
+    out.attrs[UNMATCHED_SELLS_ATTR] = unmatched
+    return out
 
 
 def add_trade_to_account(
