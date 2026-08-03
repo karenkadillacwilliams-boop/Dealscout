@@ -9,4 +9,8 @@ feedparser>=6.0.10
 defusedxml>=0.7.1
 anthropic>=0.39.0
 pytest>=8.0.0
-libsql-experimental>=0.0.41
+# Turso/libsql backend. Only imported when TURSO_* env vars are set
+# (catalysts/db.py connect()), i.e. on Streamlit Cloud and GitHub Actions —
+# both Linux. No Windows wheel is published, so pip would try to compile it
+# from Rust source and fail; the marker keeps local Windows installs working.
+libsql-experimental>=0.0.41; sys_platform != "win32"

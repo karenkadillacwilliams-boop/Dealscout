@@ -4,8 +4,11 @@ The catalysts/, alerts/, and portfolio modules read configuration via
 os.environ.get(...) so they work identically under cron, pytest, and Windows
 Task Scheduler. On Streamlit Community Cloud there is no .env file — secrets
 live in st.secrets — so we copy them across once before those modules are
-imported. Locally, st.secrets is empty and python-dotenv (loaded by app.py)
-already populated os.environ from .env, so this is a no-op.
+imported.
+
+Locally st.secrets is empty and this is a no-op; app.py calls load_dotenv()
+immediately before this to populate os.environ from .env. Because we use
+setdefault, .env always wins over st.secrets when both are present.
 """
 from __future__ import annotations
 

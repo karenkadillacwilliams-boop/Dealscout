@@ -26,3 +26,14 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("MAX_RERANK_CALLS_PER_DAY", "200")
     monkeypatch.setenv("SEC_USER_AGENT", "Dealscout-Test/1.0")
     monkeypatch.setenv("POLYGON_API_KEY", "test-polygon-key")
+    monkeypatch.setenv("FINNHUB_API_KEY", "test-finnhub-key")
+
+    # Pin the Turso vars to empty rather than deleting them. Deleting is not
+    # enough: catalyst_poller.run_once() calls load_dotenv(~/.secrets/shared.env)
+    # mid-test, and load_dotenv only skips keys already present in os.environ.
+    # An empty string is present (so the real credentials cannot be loaded over
+    # it) yet falsy, so catalysts.db.connect() takes the local sqlite3 branch
+    # and honours the tmp_path the test passed it. Without this, integration
+    # tests read and write the live production database.
+    monkeypatch.setenv("TURSO_DATABASE_URL", "")
+    monkeypatch.setenv("TURSO_AUTH_TOKEN", "")

@@ -2,7 +2,9 @@ name: Catalyst Poller
 
 on:
   schedule:
-    # Every 15 min during US market hours (Mon-Fri 09:00-21:00 UTC ~ 04:00-16:00 ET).
+    # Every 15 min, Mon-Fri 13:00-21:59 UTC = 09:00-17:59 ET during EDT
+    # (08:00-16:59 ET during EST, since cron is fixed to UTC year-round).
+    # That brackets the 09:30-16:00 ET regular session in both halves of the year.
     # GitHub cron has ~5-10 min jitter; this is intentional.
     - cron: "*/15 13-21 * * 1-5"
   workflow_dispatch:
@@ -35,6 +37,7 @@ jobs:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MAX_RERANK_CALLS_PER_DAY: ${{ secrets.MAX_RERANK_CALLS_PER_DAY }}

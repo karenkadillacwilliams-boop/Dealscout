@@ -6,11 +6,21 @@ This file is only the navigation shell and session-level sidebar status.
 from __future__ import annotations
 
 import streamlit as st
+from dotenv import load_dotenv
 
 st.set_page_config(page_title="Dealscout", page_icon="📈", layout="wide")
 
 from app_pages._boot import hydrate_env_from_secrets
 
+# Local dev: populate os.environ from the repo .env before any catalysts/,
+# alerts/, or portfolios/ module reads it. No-op on Streamlit Cloud, where no
+# .env exists. Deliberately does NOT read ~/.secrets/shared.env the way
+# catalyst_poller.py does — that file holds production TURSO_* credentials, and
+# picking them up here would silently point local dev at the live database.
+load_dotenv()
+
+# Cloud: mirror st.secrets into os.environ. Uses setdefault, so anything .env
+# already set above wins locally.
 hydrate_env_from_secrets()
 
 from app_pages import (
@@ -26,14 +36,16 @@ from app_pages import (
     trades,
     universe,
 )
-from app_pages.shared import active_tickers, get_conn
+from app_pages.shared import active_tickers, synced_conn
 from catalysts import db as cdb
 
 
 def _sidebar_header() -> None:
     st.sidebar.title("📈 Dealscout")
 
-    conn = get_conn()
+    # synced_conn() refreshes the Turso replica on a TTL. The sidebar renders
+    # on every rerun, ahead of the page body, so every page sees fresh data.
+    conn = synced_conn()
     tickers = active_tickers()
     unseen = cdb.unseen_alert_count(conn)
     last_poll = cdb.last_poll_time(conn)
@@ -53,7 +65,9 @@ def _sidebar_header() -> None:
         )
     if total_opts:
         st.sidebar.caption(f"Options tracked: {total_opts}")
-    if st.sidebar.button("🔄 Refresh prices"):
+    # Clearing cache_data drops both the price cache and the replica sync tick,
+    # so this forces a fresh Turso pull as well as fresh quotes.
+    if st.sidebar.button("🔄 Refresh data"):
         st.cache_data.clear()
         st.rerun()
 

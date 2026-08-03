@@ -248,6 +248,29 @@ def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+def sync(conn: sqlite3.Connection) -> bool:
+    """Pull remote Turso changes into the embedded replica.
+
+    connect() syncs once at open time, but the Streamlit app holds a cached
+    connection for the life of the container while the GitHub Actions poller
+    writes to Turso every 15 minutes. Without a periodic sync the app serves
+    whatever was current when it booted.
+
+    No-op on the plain sqlite3 backend (local dev), where there is nothing to
+    pull. Returns True if a sync actually ran. Never raises: a transient
+    network failure should degrade to slightly stale data, not a broken page.
+    """
+    syncer = getattr(conn, "sync", None)
+    if syncer is None:
+        return False
+    try:
+        syncer()
+        return True
+    except Exception as exc:  # noqa: BLE001 - stale data beats a crashed page
+        print(f"[db] Turso sync failed, serving cached replica: {exc}")
+        return False
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     # Phase 5 migration: add flow_type to uoa_signals if missing

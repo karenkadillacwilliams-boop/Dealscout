@@ -48,11 +48,49 @@ DB and **GitHub Actions** for the poller.
    US market hours and writes catalysts to Turso, which the Streamlit app
    reads from.
 
+   > **GitHub disables scheduled workflows after 60 days without repo
+   > activity**, and does not notify you. The poller then stops silently and
+   > the app quietly serves older and older data. If you go a while without
+   > commits, check Actions → Catalyst Poller occasionally and hit
+   > "Enable workflow" if it has been paused.
+
+### Data freshness
+
+The app holds one cached DB connection for the life of its container, so the
+Turso embedded replica is refreshed explicitly rather than only at startup:
+`app_pages/shared.py` calls `catalysts.db.sync()` on a 60-second TTL from the
+sidebar, which renders ahead of every page body. Without that, viewers would
+see whatever was current when the container last booted, no matter how often
+the poller ran. The sidebar **Refresh data** button clears the TTL and forces
+an immediate pull.
+
 ### Local development
 
-Nothing changes locally. With `TURSO_*` env vars **unset**, `catalysts.db.connect()`
-falls through to stock `sqlite3` against `dealscout.db`. `.env` continues to
-hold local secrets and is loaded via `python-dotenv`.
+```powershell
+py -3.11 -m venv .venv311
+.\.venv311\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv311\Scripts\python.exe -m pytest -q
+.\.venv311\Scripts\python.exe -m streamlit run app.py
+```
+
+With `TURSO_*` env vars **unset**, `catalysts.db.connect()` falls through to
+stock `sqlite3` against a local `dealscout.db`. `.env` holds local secrets and
+is loaded by `app.py` via `python-dotenv`.
+
+Two deliberate choices worth knowing:
+
+- **`app.py` does not read `~/.secrets/shared.env`**, though `catalyst_poller.py`
+  does. That file holds the production `TURSO_*` credentials, so reading it from
+  the app would silently point local development at the live database. Copy the
+  specific keys you want into the repo `.env` instead.
+- **`libsql-experimental` is marked `sys_platform != "win32"`** in
+  `requirements.txt`. It publishes no Windows wheel and would try to compile
+  from Rust source. It is only imported when `TURSO_*` are set, so Windows
+  never needs it; Streamlit Cloud and GitHub Actions (both Linux) still get it.
+
+The test suite pins `TURSO_*` to empty strings in `tests/conftest.py`. That is
+load-bearing: `run_once()` calls `load_dotenv(~/.secrets/shared.env)` mid-test,
+and without the pin the integration tests would read and write production.
 
 ### Architecture summary
 
